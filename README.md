@@ -21,7 +21,7 @@ https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/darus-2987/9
 # data: 2D_DarcyFlow_beta1.0_Train.hdf5
 https://darus.uni-stuttgart.de/api/access/datafile/133219
 
-# model: 2D_DarcyFlow_beta10.0_Train_FNO.pt
+# model: 2D_DarcyFlow_beta1.0_Train_FNO.pt
 https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/darus-2987/27&version=2.0
 ```
 

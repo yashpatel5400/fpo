@@ -17,7 +17,7 @@ def fpo(cfg):
     pde_name = cfg["filename"].split(".h")[0]
     times = []
     num_trials = 10
-    trial_size = 50
+    trial_size = 1
     train_data = FNODatasetSingle(filename=os.path.join("experiments", cfg["filename"]))
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=trial_size)
     model_weights = torch.load(os.path.join("experiments", f"{pde_name}_FNO.pt"))

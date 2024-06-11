@@ -6,7 +6,7 @@ batch_size: 50
 initial_step: 1
 t_train: 1
 model_update: 2
-filename: '2D_DarcyFlow_beta10.0_Train.hdf5'
+filename: '2D_DarcyFlow_beta1.0_Train.hdf5'
 single_file: True
 reduced_resolution: 2
 reduced_resolution_t: 1
