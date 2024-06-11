@@ -59,7 +59,7 @@ def plot_scores(ax, scores, pde_title):
         scores[2][2 * num_scores_per_res:]
     ]
     for res_scores, resolution in zip(scores_per_res, [r"128\times 128", r"64\times 64", r"32\times 32"]):
-        cal_scores, test_scores = res_scores[:-10], res_scores[-10:]
+        cal_scores, test_scores = res_scores[:-100], res_scores[-100:]
 
         alphas = np.arange(0, 1, 0.05)
         coverages = []
