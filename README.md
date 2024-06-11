@@ -10,6 +10,7 @@ To reproduce results of the associated manuscript, first download the following 
 https://darus.uni-stuttgart.de/api/access/datafile/133017
 
 # model: 2D_diff-react_NA_NA_FNO.pt
+https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/darus-2987/9&version=2.0
 ```
 
 -------------
@@ -21,6 +22,7 @@ https://darus.uni-stuttgart.de/api/access/datafile/133017
 https://darus.uni-stuttgart.de/api/access/datafile/133219
 
 # model: 2D_DarcyFlow_beta10.0_Train_FNO.pt
+https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/darus-2987/27&version=2.0
 ```
 
 ------------------
@@ -32,6 +34,7 @@ https://darus.uni-stuttgart.de/api/access/datafile/133219
 https://darus.uni-stuttgart.de/api/access/datafile/133021
 
 # model: 2D_rdb_NA_NA_FNO.pt
+https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/darus-2987/13&version=2.0
 ```
 
 Experiments were run on a Nvidia RTX 2080 Ti GPU with Python 3.11.8 and PyTorch version 2.2.2+cu121 (installed via pip).
