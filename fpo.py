@@ -52,13 +52,6 @@ def fpo(cfg):
             break
         end_time = time.time()
         times.append((end_time - start_time) / trial_size)
-
-    # debug_plot = False
-    # if debug_plot:
-    #     fig, (ax1, ax2) = plt.subplots(1, 2)
-    #     ax1.imshow(y.cpu().detach().numpy()[0,:,:,0,0])
-    #     ax2.imshow(yhat.cpu().detach().numpy()[0,:,:,0,0])
-    #     plt.savefig("result.png")
     return np.array(times)
 
 if __name__ == "__main__":
