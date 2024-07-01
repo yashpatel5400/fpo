@@ -11,6 +11,7 @@ import pickle
 import yaml
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
+from findiff import FinDiff
 
 from fno_utils import FNO2d, FNODatasetSingle
 
@@ -19,18 +20,29 @@ sns.set_theme()
 plt.rcParams['mathtext.fontset'] = 'stix'
 plt.rcParams['font.family'] = 'STIXGeneral'
 
-def c2_metric(field):
+def c3_metric(field):
     # axes here are specified assuming data is [batch, dim_x, dim_y], i.e. batch of 2D scalar fields
-    grad_x, grad_y   = np.gradient(field, axis=(-2,-1))
-    grad_xx, grad_xy = np.gradient(grad_x, axis=(-2,-1))
-    grad_yx, grad_yy = np.gradient(grad_y, axis=(-2,-1))
+    _, dy, dx = 1 / np.array(field.shape)
 
-    subnorms = np.array([
-        np.max(np.abs(field), axis=(-2,-1)), 
-        np.max(np.abs(np.array([grad_x, grad_y])), axis=(0,-2,-1)),
-        np.max(np.abs(np.array([grad_xx, grad_xy, grad_yx, grad_yy])), axis=(0,-2,-1)),
-    ]).T
-    return subnorms[:,0] + np.max(subnorms[:,:2], axis=1) / 2 + np.max(subnorms[:, :3], axis=1) / 4
+    partials_fields = [np.array([field])]
+    for m in range(1,4):
+        perms = []
+        for i in range(m + 1):
+            perms.append([i, m-i]) # hardcoded for 2D for now, but 3D extension is fairly straightforward
+        
+        alphas = []
+        for perm in perms:
+            alpha = []
+            if perm[0] != 0:
+                alpha.append((1, dx, perm[0]))
+            if perm[1] != 0:
+                alpha.append((2, dy, perm[1]))
+            alphas.append(alpha)
+        
+        alpha_partials_field = np.array([FinDiff(*alpha)(field) for alpha in alphas])
+        partials_fields.append(alpha_partials_field)
+    partial_field_maxes = np.array([np.max(partial_field, axis=(0,2,3)) for partial_field in partials_fields])
+    return np.sum(partial_field_maxes, axis=0)
 
 def get_scores(train_loader, fno, training_type):
     scores = []
@@ -47,7 +59,7 @@ def get_scores(train_loader, fno, training_type):
             yyhat   = fno(xxbatch[...,0,:].to(device), gridbatch.to(device))
             yybatch = yy.to(device)
         diff        = (yyhat[...,0,0] - yybatch[...,0,0]).cpu().detach().numpy()
-        score_batch = c2_metric(diff)
+        score_batch = c3_metric(diff)
         scores.append(score_batch)
     return np.concatenate(scores)
 
