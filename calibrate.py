@@ -20,6 +20,18 @@ sns.set_theme()
 plt.rcParams['mathtext.fontset'] = 'stix'
 plt.rcParams['font.family'] = 'STIXGeneral'
 
+SMALL_SIZE = 12
+MEDIUM_SIZE = 14
+BIGGER_SIZE = 18
+
+plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
+plt.rc('axes', titlesize=BIGGER_SIZE)     # fontsize of the axes title
+plt.rc('axes', labelsize=BIGGER_SIZE)    # fontsize of the x and y labels
+plt.rc('xtick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
+plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
+plt.rc('legend', fontsize=BIGGER_SIZE)    # legend fontsize
+plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+
 def c3_metric(field):
     # axes here are specified assuming data is [batch, dim_x, dim_y], i.e. batch of 2D scalar fields
     _, dy, dx = 1 / np.array(field.shape)
@@ -70,7 +82,8 @@ def plot_scores(ax, scores, pde_title):
         scores[1][num_scores_per_res:2 * num_scores_per_res], 
         scores[2][2 * num_scores_per_res:]
     ]
-    for res_scores, resolution in zip(scores_per_res, [r"128\times 128", r"64\times 64", r"32\times 32"]):
+    res_to_cov = {}
+    for res_scores, resolution in zip(scores_per_res, [r"$128\times 128$", r"$64\times 64$", r"$32\times 32$"]):
         cal_scores, test_scores = res_scores[:-100], res_scores[-100:]
 
         alphas = np.arange(0, 1, 0.05)
@@ -78,8 +91,11 @@ def plot_scores(ax, scores, pde_title):
         for alpha in alphas:
             q = np.quantile(cal_scores, q = 1-alpha)
             coverages.append(np.sum(test_scores < q) / len(test_scores))
-        sns.lineplot(x=(1-alphas), y=coverages, label="$\mathrm{" + resolution + "}$", ax=ax)
-    sns.lineplot(x=(1-alphas), y=(1-alphas), linestyle='--', ax=ax)
+        res_to_cov[resolution] = coverages[::-1]
+    df = pd.DataFrame.from_dict(res_to_cov)
+    df[r"$\alpha$"] = alphas
+    sns.lineplot(df, palette="flare", ax=ax)
+    
     ax.set_title(r"$\mathrm{" + pde_title + r"}$")
     ax.set_xlabel(r"$\mathrm{Expected\ Coverage}\ (1-\alpha)$")
     ax.legend_ = None # have just a single legend for the figure
