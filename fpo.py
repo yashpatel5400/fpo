@@ -40,8 +40,8 @@ def optimize(uhat, quantile, r):
     x_grid = wavelet_basis.x_grid.reshape(uhat.shape[0], uhat.shape[1], -1)
 
     # problem specification (constant over optimization)
-    eta       = 1e-4
-    max_iters = 100
+    eta       = 1e-3
+    max_iters = 1_000
 
     w = np.array([0.6, 0.6])
     for iter in range(max_iters):
@@ -93,7 +93,7 @@ def fpo(cfg):
     trial_size = 1
     train_data = FNODatasetSingle(filename=os.path.join("experiments", cfg["filename"]), reduced_resolution=cfg["downsampling"])
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=trial_size)
-    model_weights = torch.load(os.path.join("experiments", f"{pde_name}_FNO.pt"))
+    model_weights = torch.load(os.path.join("experiments", f"{pde_name}_FNO.pt"), map_location="cuda:0")
 
     r = 0.05 # collection well radius
     regret_ratios = []
@@ -149,6 +149,6 @@ if __name__ == "__main__":
         cfg["cp_quantile"] = pd.read_csv(cp_quantiles_fn)[str(cfg["downsampling"])].values[-1]
     regret_ratios = fpo(cfg)
 
-    result_fn = os.path.join("results", f"regret_{args.pde}.pkl")
+    result_fn = os.path.join("results", f"regret_{args.pde}-{args.nominal}.pkl")
     with open(result_fn, "wb") as f:
         pickle.dump(regret_ratios, f)
