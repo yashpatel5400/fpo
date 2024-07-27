@@ -32,7 +32,7 @@ plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
 plt.rc('legend', fontsize=BIGGER_SIZE)    # legend fontsize
 plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
-def c3_metric(field):
+def get_partials(field):
     # axes here are specified assuming data is [batch, dim_x, dim_y], i.e. batch of 2D scalar fields
     _, dy, dx = 1 / np.array(field.shape)
 
@@ -53,8 +53,14 @@ def c3_metric(field):
         
         alpha_partials_field = np.array([FinDiff(*alpha)(field) for alpha in alphas])
         partials_fields.append(alpha_partials_field)
+    return partials_fields
+
+
+def c3_metric(field):
+    partials_fields = get_partials(field)
     partial_field_maxes = np.array([np.max(partial_field, axis=(0,2,3)) for partial_field in partials_fields])
     return np.sum(partial_field_maxes, axis=0)
+
 
 def get_scores(train_loader, fno, training_type):
     scores = []
@@ -75,23 +81,19 @@ def get_scores(train_loader, fno, training_type):
         scores.append(score_batch)
     return np.concatenate(scores)
 
-def plot_scores(ax, scores, pde_title):
-    num_scores_per_res = len(scores[0]) // 3
-    scores_per_res = [
-        scores[0][:num_scores_per_res], 
-        scores[1][num_scores_per_res:2 * num_scores_per_res], 
-        scores[2][2 * num_scores_per_res:]
-    ]
-    res_to_cov = {}
-    for res_scores, resolution in zip(scores_per_res, [r"$128\times 128$", r"$64\times 64$", r"$32\times 32$"]):
-        cal_scores, test_scores = res_scores[:-100], res_scores[-100:]
 
-        alphas = np.arange(0, 1, 0.05)
-        coverages = []
-        for alpha in alphas:
-            q = np.quantile(cal_scores, q = 1-alpha)
-            coverages.append(np.sum(test_scores < q) / len(test_scores))
-        res_to_cov[resolution] = coverages[::-1]
+def plot_calibration(alphas, ax, downsampling_to_cp_quantiles, downsampling_to_test_scores, pde_title):
+    downsampling_to_resolution = {
+        1 : r"$128\times 128$", 
+        2 : r"$64\times 64$", 
+        4 : r"$32\times 32$",
+    }
+    res_to_cov = {}
+    for downsampling in downsampling_to_cp_quantiles:
+        quantiles   = downsampling_to_cp_quantiles[downsampling]
+        test_scores = downsampling_to_test_scores[downsampling]
+        coverages = [np.sum(test_scores < quantile) / len(test_scores) for quantile in quantiles]
+        res_to_cov[downsampling_to_resolution[downsampling]] = coverages[::-1]
     df = pd.DataFrame.from_dict(res_to_cov)
     df[r"$\alpha$"] = alphas
     sns.lineplot(df, palette="flare", ax=ax)
@@ -100,7 +102,8 @@ def plot_scores(ax, scores, pde_title):
     ax.set_xlabel(r"$\mathrm{Expected\ Coverage}\ (1-\alpha)$")
     ax.legend_ = None # have just a single legend for the figure
     
-def test_calibration(pde, ax):
+
+def test_calibration(alphas, pde, ax):
     cfg_fn = os.path.join("experiments", f"config_{pde}.yaml")
     with open(cfg_fn, "r") as f:
         cfg = yaml.safe_load(f)
@@ -116,30 +119,47 @@ def test_calibration(pde, ax):
         initial_step=cfg["initial_step"]).to("cuda")
     fno.load_state_dict(model_weights["model_state_dict"])
 
-    scores = []
-    downsampling = [1,2,4]
-    for resolution in downsampling:
+    downsampling_to_scores = {1 : [], 2 : [], 4 : []}
+    for downsampling in downsampling_to_scores:
         batch_size = 25
-        train_data = FNODatasetSingle(filename=os.path.join("experiments", cfg["filename"]), reduced_resolution=resolution)
+        train_data = FNODatasetSingle(filename=os.path.join("experiments", cfg["filename"]), reduced_resolution=downsampling)
         train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size)    
-        scores.append(get_scores(train_loader, fno, cfg["training_type"]))
+        downsampling_to_scores[downsampling] = get_scores(train_loader, fno, cfg["training_type"])
+
+    downsampling_to_cp_quantiles = {}
+    downsampling_to_test_scores  = {}
+    for downsampling in downsampling_to_scores:
+        scores = downsampling_to_scores[downsampling]
+        cal_scores, test_scores = scores[:-100], scores[-100:]
+        quantiles = [np.quantile(cal_scores, q = 1-alpha) for alpha in alphas]
+        
+        downsampling_to_cp_quantiles[downsampling] = quantiles
+        downsampling_to_test_scores[downsampling]  = test_scores
 
     pde_name_to_title = {
         "darcy": r"2D\ Darcy\ Flow",
         "diffreact": r"2D\ Diffusion\ Reaction",
         "rdb": r"2D\ Shallow\ Water",
     }
+    plot_calibration(alphas, ax, downsampling_to_cp_quantiles, downsampling_to_test_scores, pde_name_to_title[pde])
+    return downsampling_to_cp_quantiles
 
-    plot_scores(ax, scores, pde_name_to_title[pde])
 
 if __name__ == "__main__":
+    os.makedirs("results", exist_ok=True)
     fig, axs = plt.subplots(1, 3, figsize=(18,6))
     for pde, ax in zip(["darcy", "diffreact", "rdb"], axs):
-        test_calibration(pde, ax)
+        print(f"Calibrating: {pde}")
+        alphas = np.arange(0, 1, 0.05)
+        pde_cp_quantiles = test_calibration(alphas, pde, ax)
+
+        result_fn = os.path.join("experiments", f"quantiles_{pde}.csv")
+        scores_df = pd.DataFrame.from_dict(pde_cp_quantiles).set_index(alphas)
+        scores_df.to_csv(result_fn)
+
     axs[0].set_ylabel(r"$\mathrm{Empirical\ Coverage}$")
     handles, labels = axs[-1].get_legend_handles_labels()
     fig.legend(handles, labels, loc='upper right')
     fig.tight_layout()
     
-    os.makedirs("results", exist_ok=True)
     plt.savefig(os.path.join("results", "calibration.png"))

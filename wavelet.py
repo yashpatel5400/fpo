@@ -2,6 +2,16 @@ import numpy as np
 import math
 import pywt
 
+def get_disc_grid(disc_pts):
+    x_rec  = np.arange(0, 1, 1 / disc_pts)
+    arrays = [x_rec, x_rec]
+    la = len(arrays)
+    dtype = np.result_type(*arrays)
+    arr = np.empty([len(a) for a in arrays] + [la], dtype=dtype)
+    for i, a in enumerate(np.ix_(*arrays)):
+        arr[...,i] = a
+    return arr.reshape(-1, la)
+
 class WaveletBasis:
     def __init__(self):
         self.wavelet_family = "db2"
@@ -23,18 +33,9 @@ class WaveletBasis:
         idxs = np.clip(idx_tmp - 1, 0, len(x_wav)-1)
         return idxs
 
-    def _cartesian_product(self, *arrays):
-        la = len(arrays)
-        dtype = np.result_type(*arrays)
-        arr = np.empty([len(a) for a in arrays] + [la], dtype=dtype)
-        for i, a in enumerate(np.ix_(*arrays)):
-            arr[...,i] = a
-        return arr.reshape(-1, la)
-
     def _get_raw_basis_decomp(self, f):
         # ---- Wavelet decomposition parameters
         scale = int(np.log2(f.shape[0]))
-        dx    = pow(2, -scale)
         k_s   = 1. / math.sqrt(pow(2, scale))
         fL, fH, x_wav = self.wavelet.wavefun(level=scale+2)
 
@@ -48,15 +49,14 @@ class WaveletBasis:
         if self.basis_func is not None: # assume the flow is raw basis -> filter after which only use filter 
             return coeffs, None
 
-        x_rec  = np.arange(0, 1, dx)
-        self.x_grid = self._cartesian_product(x_rec, x_rec)
+        self.x_grid = get_disc_grid(f.shape[0])
         x_grid_offset = np.expand_dims(np.expand_dims(self.x_grid - self.A, 1), 1)
 
         inv_s = pow(2, scale - nb_levels)
         ks    = np.array([[(k_1, k_2) for k_2 in range(LL.shape[1])] for k_1 in range(LL.shape[0])])
         idxs  = self._get_disc_idxs(x_grid_offset, ks, inv_s, x_wav)
 
-        final_shape_tuple = (x_rec.shape[0], x_rec.shape[0], -1)
+        final_shape_tuple = tuple(f.shape) + (-1,)
 
         fL_x, fL_y = fL[idxs[...,0]].reshape(final_shape_tuple), fL[idxs[...,1]].reshape(final_shape_tuple)
         fH_x, fH_y = fH[idxs[...,0]].reshape(final_shape_tuple), fH[idxs[...,1]].reshape(final_shape_tuple)
