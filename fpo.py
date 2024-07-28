@@ -41,8 +41,8 @@ def optimize(uhat, quantile, r, score_func):
     x_grid = wavelet_basis.x_grid.reshape(uhat.shape[0], uhat.shape[1], -1)
 
     # problem specification (constant over optimization)
-    eta       = 1e-3 if score_func != "c3" else 5e-4
-    max_iters = 1_000
+    eta       = 5e-4 if score_func == "c3" else 1e-3
+    max_iters = 200
 
     w = np.array([0.6, 0.6])
     for iter in range(max_iters):

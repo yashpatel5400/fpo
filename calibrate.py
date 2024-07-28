@@ -88,7 +88,7 @@ def get_scores(train_loader, fno, training_type, score_func):
     return np.concatenate(scores)
 
 
-def plot_calibration(alphas, ax, downsampling_to_cp_quantiles, downsampling_to_test_scores, pde_title):
+def plot_calibration(desired_coverages, ax, downsampling_to_cp_quantiles, downsampling_to_test_scores, pde_title):
     downsampling_to_resolution = {
         1 : r"$128\times 128$", 
         2 : r"$64\times 64$", 
@@ -99,9 +99,11 @@ def plot_calibration(alphas, ax, downsampling_to_cp_quantiles, downsampling_to_t
         quantiles   = downsampling_to_cp_quantiles[downsampling]
         test_scores = downsampling_to_test_scores[downsampling]
         coverages = [np.sum(test_scores < quantile) / len(test_scores) for quantile in quantiles]
-        res_to_cov[downsampling_to_resolution[downsampling]] = coverages[::-1]
+        res_to_cov[downsampling_to_resolution[downsampling]] = coverages
     df = pd.DataFrame.from_dict(res_to_cov)
-    df[r"$\alpha$"] = alphas
+    df[r"Target"] = desired_coverages
+    df[r"Reference"] = desired_coverages
+    df = df.set_index(r"Target")
     sns.lineplot(df, palette="flare", ax=ax)
     
     ax.set_title(r"$\mathrm{" + pde_title + r"}$")
@@ -109,7 +111,7 @@ def plot_calibration(alphas, ax, downsampling_to_cp_quantiles, downsampling_to_t
     ax.legend_ = None # have just a single legend for the figure
     
 
-def test_calibration(alphas, score_func, pde, ax):
+def test_calibration(desired_coverages, score_func, pde, ax):
     cfg_fn = os.path.join("experiments", f"config_{pde}.yaml")
     with open(cfg_fn, "r") as f:
         cfg = yaml.safe_load(f)
@@ -137,7 +139,7 @@ def test_calibration(alphas, score_func, pde, ax):
     for downsampling in downsampling_to_scores:
         scores = downsampling_to_scores[downsampling]
         cal_scores, test_scores = scores[:-100], scores[-100:]
-        quantiles = [np.quantile(cal_scores, q = 1-alpha) for alpha in alphas]
+        quantiles = [np.quantile(cal_scores, q = desired_coverage) for desired_coverage in desired_coverages]
         
         downsampling_to_cp_quantiles[downsampling] = quantiles
         downsampling_to_test_scores[downsampling]  = test_scores
@@ -147,7 +149,7 @@ def test_calibration(alphas, score_func, pde, ax):
         "diffreact": r"2D\ Diffusion\ Reaction",
         "rdb": r"2D\ Shallow\ Water",
     }
-    plot_calibration(alphas, ax, downsampling_to_cp_quantiles, downsampling_to_test_scores, pde_name_to_title[pde])
+    plot_calibration(desired_coverages, ax, downsampling_to_cp_quantiles, downsampling_to_test_scores, pde_name_to_title[pde])
     return downsampling_to_cp_quantiles
 
 
@@ -157,11 +159,13 @@ if __name__ == "__main__":
         fig, axs = plt.subplots(1, 3, figsize=(18,6))
         for pde, ax in zip(["darcy", "diffreact", "rdb"], axs):
             print(f"Calibrating {score_func}: {pde}")
-            alphas = np.arange(0, 1, 0.05)
-            pde_cp_quantiles = test_calibration(alphas, score_func, pde, ax)
+            desired_coverages = np.arange(0, 1, 0.05) # technically 1-alpha but just to simplify having to do 1- everywhere
+            pde_cp_quantiles = test_calibration(desired_coverages, score_func, pde, ax)
 
             result_fn = os.path.join("experiments", f"quantiles_{pde}_{score_func}.csv")
-            scores_df = pd.DataFrame.from_dict(pde_cp_quantiles).set_index(alphas)
+            scores_df = pd.DataFrame.from_dict(pde_cp_quantiles)
+            scores_df["Target Coverage"] = desired_coverages
+            scores_df = scores_df.set_index("Target Coverage")
             scores_df.to_csv(result_fn)
 
         axs[0].set_ylabel(r"$\mathrm{Empirical\ Coverage}$")
