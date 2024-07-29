@@ -35,13 +35,13 @@ def optimize(uhat, quantile, r, score_func):
     shaped_basis = wavelet_basis.basis_func.reshape(wavelet_basis.basis_func.shape[1], uhat.shape[0], uhat.shape[1])
     partials = get_partials(shaped_basis)
     partials = [
-        np.transpose(np.array([partial.reshape(partial.shape[0], -1) for partial in partial_order]), (0, 2, 1)) 
+        np.array([partial.reshape(partial.shape[0], -1) for partial in partial_order]) 
         for partial_order in partials
     ]
     x_grid = wavelet_basis.x_grid.reshape(uhat.shape[0], uhat.shape[1], -1)
 
     # problem specification (constant over optimization)
-    eta       = 5e-4 if score_func == "c3" else 1e-3
+    eta       = 1e-2
     max_iters = 200
 
     w = np.array([0.6, 0.6])
@@ -52,7 +52,7 @@ def optimize(uhat, quantile, r, score_func):
                 u_coeff = cp.Variable(uhat_coeffs.shape)
 
                 integral_mask = (np.linalg.norm(wavelet_basis.x_grid - w, axis=1) < r).astype(np.int8).reshape(uhat.shape)
-                psi_w = np.sum(shaped_basis * integral_mask, axis=(1,2))
+                psi_w = np.sum(shaped_basis * np.expand_dims(np.expand_dims(integral_mask.flatten(), axis=-1), axis=-1), axis=0).flatten()
                 objective = cp.Minimize(-u_coeff @ psi_w)
 
                 constraints = [
@@ -88,6 +88,20 @@ def optimize(uhat, quantile, r, score_func):
         w = w - eta * w_grad
         print(f"{iter} : w : {w} -- w_grad : {np.linalg.norm(w_grad)}")
     return w
+
+
+def solve_nominal(uhat, r):
+    x_grid = get_disc_grid(uhat.shape[0])
+    candidate_w = x_grid.copy()
+
+    tiled_x_grid = np.tile(x_grid, (x_grid.shape[0], 1, 1))
+    tiled_offset = np.transpose(np.tile(candidate_w, (candidate_w.shape[0], 1, 1)), (1, 0, 2))
+    offsets = tiled_x_grid - tiled_offset
+
+    masks = np.linalg.norm(offsets, axis=-1) < r
+    masks = masks.reshape(masks.shape[0], uhat.shape[0], uhat.shape[1])
+    objs = np.sum(uhat * masks, axis=(1,2))
+    return candidate_w[np.argmax(objs)]
 
 
 def eval_regret_ratio(u, w, w_star, r):
@@ -135,9 +149,9 @@ def fpo(cfg):
 
         uhat = uuhat[0,...,0,0].detach().cpu().numpy()
         u    = uubatch[0,...,0,0].detach().cpu().numpy()
-        
+
         w = optimize(uhat, cfg["cp_quantile"], r, cfg["score_func"])
-        w_star = optimize(u, None, r, None)
+        w_star = solve_nominal(u, r)
         regret_ratios.append(eval_regret_ratio(u, w, w_star, r))
     return np.array(regret_ratios)
 
@@ -145,7 +159,7 @@ def fpo(cfg):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--pde", choices=["darcy", "diffreact", "rdb"])
-    parser.add_argument("--score_func", choices=["c3", "l2", "linf"])
+    parser.add_argument("--score_func", choices=["c3", "l2", "linf"], default="c3")
     parser.add_argument("--nominal", action="store_true")
     parser.add_argument("--downsampling", type=int, default=1)
     args = parser.parse_args()
