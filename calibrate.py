@@ -62,6 +62,32 @@ def c3_metric(field):
     return np.sum(partial_field_maxes, axis=0)
 
 
+def get_disc_grid(disc_pts):
+    x_rec  = np.arange(0, 1, 1 / disc_pts)
+    arrays = [x_rec, x_rec]
+    la = len(arrays)
+    dtype = np.result_type(*arrays)
+    arr = np.empty([len(a) for a in arrays] + [la], dtype=dtype)
+    for i, a in enumerate(np.ix_(*arrays)):
+        arr[...,i] = a
+    return arr.reshape(-1, la)
+
+
+def sobolev(f, cn=3):
+    sobolev_norm_alphas = []
+    cur_ders = [f]
+    for _ in range(cn+1):
+        sobolev_norm_alpha = np.max([np.max(np.abs(C.chebval2d(x_grid[:,0], x_grid[:,1], der))) for der in cur_ders])
+        sobolev_norm_alphas.append(sobolev_norm_alpha)
+
+        next_ders = []
+        for der in cur_ders:
+            for axis in range(2):
+                next_ders.append(C.chebder(der, axis=axis))
+        cur_ders = next_ders
+    return np.sum(sobolev_norm_alphas)
+
+
 def get_scores(train_loader, fno, training_type, score_func):
     scores = []
     for xxbatch, yy, gridbatch in train_loader:
