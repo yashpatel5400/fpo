@@ -52,7 +52,7 @@ def solve_random_setup():
 
 if __name__ == "__main__":
     fs, us = [], []
-    N = 200
+    N = 1_000
     for _ in range(N):
         f, u = solve_random_setup()
         fs.append(f) 
