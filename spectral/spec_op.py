@@ -31,8 +31,12 @@ net  = SpecOp(fs.shape[-1], us.shape[-1])
 loss = nn.MSELoss()
 opt  = torch.optim.Adam(net.parameters())
 
-fs = torch.from_numpy(fs).to(torch.float32).to("cuda")
-us = torch.from_numpy(us).to(torch.float32).to("cuda")
+prop_train = 0.75
+N = fs.shape[0]
+N_train = int(N * prop_train)
+
+fs = torch.from_numpy(fs[:N_train]).to(torch.float32).to("cuda")
+us = torch.from_numpy(us[:N_train]).to(torch.float32).to("cuda")
 net = net.to("cuda")
 
 batch_size  = 25

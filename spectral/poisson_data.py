@@ -8,39 +8,28 @@ logger = logging.getLogger(__name__)
 
 def solve_random_setup():
     # Parameters
-    Lx, Ly = 2*np.pi, np.pi
-    Nx, Ny = 256, 128
+    Lx, Ly = 2 * np.pi, 2 * np.pi
+    Nx, Ny = 256, 256
     dtype = np.float64
 
     # Bases
-    coords = d3.CartesianCoordinates('x', 'y')
-    dist = d3.Distributor(coords, dtype=dtype)
-    xbasis = d3.RealFourier(coords['x'], size=Nx, bounds=(0, Lx))
-    ybasis = d3.Chebyshev(coords['y'], size=Ny, bounds=(0, Ly))
+    coords = d3.CartesianCoordinates("x", "y")
+    dist   = d3.Distributor(coords, dtype=dtype)
+    xbasis = d3.RealFourier(coords["x"], size=Nx, bounds=(0, Lx))
+    ybasis = d3.RealFourier(coords["y"], size=Ny, bounds=(0, Ly))
 
     # Fields
     u = dist.Field(name='u', bases=(xbasis, ybasis))
-    tau_1 = dist.Field(name='tau_1', bases=xbasis)
-    tau_2 = dist.Field(name='tau_2', bases=xbasis)
+    tau_u = dist.Field(name='tau_u')
 
     # Forcing
-    x, y = dist.local_grids(xbasis, ybasis)
-    f = dist.Field(bases=(xbasis, ybasis))
-    g = dist.Field(bases=xbasis)
+    f = dist.Field(name='f', bases=(xbasis, ybasis))
     f.fill_random('g', seed=40)
-    f['c'][10:,10:] = 0
-    g['g'] = 0
-
-    # Substitutions
-    dy = lambda A: d3.Differentiate(A, coords['y'])
-    lift_basis = ybasis.derivative_basis(2)
-    lift = lambda A, n: d3.Lift(A, lift_basis, n)
 
     # Problem
-    problem = d3.LBVP([u, tau_1, tau_2], namespace=locals())
-    problem.add_equation("lap(u) + lift(tau_1,-1) + lift(tau_2,-2) = f")
-    problem.add_equation("u(y=0) = g")
-    problem.add_equation("u(y=Ly) = g")
+    problem = d3.LBVP([u, tau_u], namespace=locals())
+    problem.add_equation("lap(u) + tau_u = f")
+    problem.add_equation("integ(u) = 0")
 
     # Solver
     solver = problem.build_solver()
