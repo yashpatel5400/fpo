@@ -24,7 +24,7 @@ def solve_random_setup():
 
     # Forcing
     f = dist.Field(name='f', bases=(xbasis, ybasis))
-    f.fill_random('g', seed=40)
+    f.fill_random('g')
 
     # Problem
     problem = d3.LBVP([u, tau_u], namespace=locals())
