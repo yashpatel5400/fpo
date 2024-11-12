@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import utils
+
 class SpecOp(nn.Module):
     def __init__(self, k_in, k_out):
         super().__init__()
@@ -24,40 +26,51 @@ class SpecOp(nn.Module):
         x = self.linear3(x)
         return x
     
-with open("poisson.pkl", "rb") as f:
-    (fs, us) = pickle.load(f)
 
-net  = SpecOp(fs.shape[-1], us.shape[-1])
-loss = nn.MSELoss()
-opt  = torch.optim.Adam(net.parameters())
+def get_data(pde):
+    with open(utils.DATA_FN(pde), "rb") as f:
+        (fs, us) = pickle.load(f)
 
-prop_train = 0.75
-N = fs.shape[0]
-N_train = int(N * prop_train)
+    prop_train = 0.75
+    N = fs.shape[0]
+    N_train = int(N * prop_train)
 
-fs = torch.from_numpy(fs[:N_train]).to(torch.float32).to("cuda")
-us = torch.from_numpy(us[:N_train]).to(torch.float32).to("cuda")
-net = net.to("cuda")
+    fs = torch.from_numpy(fs[:N_train]).to(torch.float32).to("cuda")
+    us = torch.from_numpy(us[:N_train]).to(torch.float32).to("cuda")
+    return fs, us
 
-batch_size  = 25
-num_batches = fs.shape[0] // batch_size
-epochs = 100
 
-losses = []
-for epoch in range(epochs):
-    for batch in range(num_batches):
-        f_batch = fs[batch * batch_size:(batch+1) * batch_size]
-        u_batch = us[batch * batch_size:(batch+1) * batch_size]
+def train_model(pde, fs, us):
+    net  = SpecOp(fs.shape[-1], us.shape[-1])
+    loss = nn.MSELoss()
+    opt  = torch.optim.Adam(net.parameters())
+    net = net.to("cuda")
 
-        u_hat = net(f_batch)
-        loss_val = loss(u_hat, u_batch)
-        
-        opt.zero_grad()
-        loss_val.backward()
-        opt.step()
+    batch_size  = 25
+    num_batches = fs.shape[0] // batch_size
+    epochs = 100
 
-    losses.append(loss_val.cpu().detach().numpy())
-    if epoch % 10 == 0:
-        print(f"Epoch {epoch} / {epochs} -- {loss_val}")
+    losses = []
+    for epoch in range(epochs):
+        for batch in range(num_batches):
+            f_batch = fs[batch * batch_size:(batch+1) * batch_size]
+            u_batch = us[batch * batch_size:(batch+1) * batch_size]
 
-torch.save(net.state_dict(), "poisson.pt")
+            u_hat = net(f_batch)
+            loss_val = loss(u_hat, u_batch)
+            
+            opt.zero_grad()
+            loss_val.backward()
+            opt.step()
+
+        losses.append(loss_val.cpu().detach().numpy())
+        if epoch % 10 == 0:
+            print(f"Epoch {epoch} / {epochs} -- {loss_val}")
+
+    torch.save(net.state_dict(), utils.MODEL_FN(pde))
+
+
+if __name__ == "__main__":
+    pde = "poisson"
+    fs, us = get_data(pde)
+    train_model(pde, fs, us)
