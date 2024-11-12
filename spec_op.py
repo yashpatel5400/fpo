@@ -1,3 +1,4 @@
+import argparse
 import numpy as np
 import pickle
 
@@ -71,6 +72,9 @@ def train_model(pde, fs, us):
 
 
 if __name__ == "__main__":
-    pde = "poisson"
-    fs, us = get_data(pde)
-    train_model(pde, fs, us)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--pde")
+    args = parser.parse_args()
+
+    fs, us = get_data(args.pde)
+    train_model(args.pde, fs, us)

@@ -1,3 +1,4 @@
+import argparse
 import numpy as np
 import pickle
 import pandas as pd
@@ -22,6 +23,7 @@ mpl.rcParams['text.usetex'] = True
 mpl.rcParams['mathtext.fontset'] = 'stix'
 mpl.rcParams['font.family'] = 'STIXGeneral'
 mpl.rcParams['text.latex.preamble'] = r'\usepackage{amsfonts}'
+mpl.rcParams['figure.figsize'] = (12,8)
 
 SMALL_SIZE = 12
 MEDIUM_SIZE = 14
@@ -135,7 +137,7 @@ def calibrate(pde):
         delta_q_df  = pd.DataFrame(columns=["trial", "K", "delta_q"])
 
         alphas = np.arange(0.05, 1, 0.05)
-        trials = range(1)
+        trials = range(10)
         for trial in trials:
             _, volume, coverages = sobolev_cp_cov(u_hat, u_cal, K=125, s=s, gamma=gamma, alphas=alphas)
             for alpha, coverage in zip(alphas, coverages):
@@ -147,18 +149,18 @@ def calibrate(pde):
             volume_df.index = volume_df.index + 1
             volume_df = volume_df.sort_index()
 
-            # Ks = np.arange(5, 100, 5)
-            # for K in Ks:
-            #     delta_q, _ = sobolev_cp_cov(u_hat, u_cal, K=125, s=s, gamma=gamma, alphas=[0.05])
-            #     delta_q_df.loc[-1] = [trial, K, delta_q[0]]
-            #     delta_q_df.index = delta_q_df.index + 1
-            #     delta_q_df = delta_q_df.sort_index()
+        #     Ks = np.arange(5, 100, 5)
+        #     for K in Ks:
+        #         delta_q, _, _ = sobolev_cp_cov(u_hat, u_cal, K=125, s=s, gamma=gamma, alphas=[0.05])
+        #         delta_q_df.loc[-1] = [trial, K, delta_q[0]]
+        #         delta_q_df.index = delta_q_df.index + 1
+        #         delta_q_df = delta_q_df.sort_index()
         
         # plt.title(r"$K$ vs $\Delta\widehat{q}$ ($\gamma = " + str(gamma) + "$)")
         # plt.xlabel(r"$K$")
         # plt.ylabel(r"$\widehat{q}^{*}_{\gamma} - \widehat{q}_{\gamma}$")
         # sns.lineplot(delta_q_df, x="K", y="delta_q")
-        # plt.savefig(os.path.join(pde, f"delta_q_gamma={gamma}.png"))
+        # plt.savefig(os.path.join(utils.PDE_DIR(pde), f"delta_q_gamma={gamma}.png"))
         # plt.tight_layout()
         # plt.clf()
 
@@ -169,7 +171,7 @@ def calibrate(pde):
 
     plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
     plt.tight_layout()
-    plt.savefig(os.path.join(pde, f"coverage.png"))
+    plt.savefig(os.path.join(utils.PDE_DIR(pde), f"coverage.png"))
     plt.clf()
 
     plt.title(r"$\gamma \mathrm{\ vs\ Volume}$")
@@ -178,10 +180,13 @@ def calibrate(pde):
     sns.lineplot(volume_df, x="gamma", y="volume")
 
     plt.tight_layout()
-    plt.savefig(os.path.join(pde, f"volume.png"))
+    plt.savefig(os.path.join(utils.PDE_DIR(pde), f"volume.png"))
     plt.clf()
 
 
 if __name__ == "__main__":
-    pde = "poisson"
-    calibrate(pde)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--pde")
+    args = parser.parse_args()
+
+    calibrate(args.pde)

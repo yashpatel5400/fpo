@@ -1,3 +1,4 @@
 import os
-DATA_FN  = lambda pde : os.path.join("data", pde, "data.pkl")
-MODEL_FN = lambda pde : os.path.join("data", pde, "model.pt")
+PDE_DIR  = lambda pde : os.path.join("data", pde)
+DATA_FN  = lambda pde : os.path.join(PDE_DIR(pde), "data.pkl")
+MODEL_FN = lambda pde : os.path.join(PDE_DIR(pde), "model.pt")
