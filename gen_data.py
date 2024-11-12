@@ -44,100 +44,89 @@ def solve_poisson():
     return (f['c'].flatten(), uc.flatten())
 
 
-def solve_rayleigh():
+def solve_flow():
     # Parameters
-    Lx, Lz = 4, 1
-    Nx, Nz = 256, 64
-    Rayleigh = 2e6
-    Prandtl = 1
+    Lx, Lz = 1, 2
+    Nx, Nz = 128, 256
+    Reynolds = 5e4
+    Schmidt = 1
     dealias = 3/2
-    stop_sim_time = 1
+    stop_sim_time = 3
     timestepper = d3.RK222
-    max_timestep = 0.125
+    max_timestep = 1e-2
     dtype = np.float64
 
     # Bases
     coords = d3.CartesianCoordinates('x', 'z')
     dist = d3.Distributor(coords, dtype=dtype)
     xbasis = d3.RealFourier(coords['x'], size=Nx, bounds=(0, Lx), dealias=dealias)
-    zbasis = d3.ChebyshevT(coords['z'], size=Nz, bounds=(0, Lz), dealias=dealias)
+    zbasis = d3.RealFourier(coords['z'], size=Nz, bounds=(-Lz/2, Lz/2), dealias=dealias)
 
     # Fields
     p = dist.Field(name='p', bases=(xbasis,zbasis))
-    b = dist.Field(name='b', bases=(xbasis,zbasis))
+    s = dist.Field(name='s', bases=(xbasis,zbasis))
     u = dist.VectorField(coords, name='u', bases=(xbasis,zbasis))
     tau_p = dist.Field(name='tau_p')
-    tau_b1 = dist.Field(name='tau_b1', bases=xbasis)
-    tau_b2 = dist.Field(name='tau_b2', bases=xbasis)
-    tau_u1 = dist.VectorField(coords, name='tau_u1', bases=xbasis)
-    tau_u2 = dist.VectorField(coords, name='tau_u2', bases=xbasis)
 
     # Substitutions
-    kappa = (Rayleigh * Prandtl)**(-1/2)
-    nu = (Rayleigh / Prandtl)**(-1/2)
+    nu = 1 / Reynolds
+    D = nu / Schmidt
     x, z = dist.local_grids(xbasis, zbasis)
     ex, ez = coords.unit_vector_fields(dist)
-    lift_basis = zbasis.derivative_basis(1)
-    lift = lambda A: d3.Lift(A, lift_basis, -1)
-    grad_u = d3.grad(u) + ez*lift(tau_u1) # First-order reduction
-    grad_b = d3.grad(b) + ez*lift(tau_b1) # First-order reduction
 
     # Problem
-    # First-order form: "div(f)" becomes "trace(grad_f)"
-    # First-order form: "lap(f)" becomes "div(grad_f)"
-    problem = d3.IVP([p, b, u, tau_p, tau_b1, tau_b2, tau_u1, tau_u2], namespace=locals())
-    problem.add_equation("trace(grad_u) + tau_p = 0")
-    problem.add_equation("dt(b) - kappa*div(grad_b) + lift(tau_b2) = - u@grad(b)")
-    problem.add_equation("dt(u) - nu*div(grad_u) + grad(p) - b*ez + lift(tau_u2) = - u@grad(u)")
-    problem.add_equation("b(z=0) = Lz")
-    problem.add_equation("u(z=0) = 0")
-    problem.add_equation("b(z=Lz) = 0")
-    problem.add_equation("u(z=Lz) = 0")
+    problem = d3.IVP([u, s, p, tau_p], namespace=locals())
+    problem.add_equation("dt(u) + grad(p) - nu*lap(u) = - u@grad(u)")
+    problem.add_equation("dt(s) - D*lap(s) = - u@grad(s)")
+    problem.add_equation("div(u) + tau_p = 0")
     problem.add_equation("integ(p) = 0") # Pressure gauge
 
     # Solver
     solver = problem.build_solver(timestepper)
     solver.stop_sim_time = stop_sim_time
+    uic = np.linalg.norm(u['c'].copy(), axis=0)
 
     # Initial conditions
-    b.fill_random('g', seed=42, distribution='normal', scale=1e-3) # Random noise
-    b['g'] *= z * (Lz - z) # Damp noise at walls
-    b['g'] += Lz - z # Add linear background
-    bic = b['g'].copy()
+    # Background shear
+    u['g'][0] = 1/2 + 1/2 * (np.tanh((z-0.5)/0.1) - np.tanh((z+0.5)/0.1))
+    # Match tracer to shear
+    s['g'] = u['g'][0]
+    # Add small vertical velocity perturbations localized to the shear layers
+    u['g'][1] += np.random.random() * np.sin(2*np.pi*x/Lx) * np.exp(-(z-0.5)**2/0.01)
 
     # Analysis
-    snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=0.25, max_writes=50)
-    snapshots.add_task(b, name='buoyancy')
+    snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=0.1, max_writes=10)
+    snapshots.add_task(s, name='tracer')
+    snapshots.add_task(p, name='pressure')
     snapshots.add_task(-d3.div(d3.skew(u)), name='vorticity')
 
     # CFL
-    CFL = d3.CFL(solver, initial_dt=max_timestep, cadence=10, safety=0.5, threshold=0.05,
+    CFL = d3.CFL(solver, initial_dt=max_timestep, cadence=10, safety=0.2, threshold=0.1,
                 max_change=1.5, min_change=0.5, max_dt=max_timestep)
     CFL.add_velocity(u)
 
     # Flow properties
     flow = d3.GlobalFlowProperty(solver, cadence=10)
-    flow.add_property(np.sqrt(u@u)/nu, name='Re')
+    flow.add_property((u@ez)**2, name='w2')
 
     # Main loop
-    startup_iter = 10
     try:
         logger.info('Starting main loop')
         while solver.proceed:
             timestep = CFL.compute_timestep()
             solver.step(timestep)
             if (solver.iteration-1) % 10 == 0:
-                max_Re = flow.max('Re')
-                logger.info('Iteration=%i, Time=%e, dt=%e, max(Re)=%f' %(solver.iteration, solver.sim_time, timestep, max_Re))
+                max_w = np.sqrt(flow.max('w2'))
+                logger.info('Iteration=%i, Time=%e, dt=%e, max(w)=%f' %(solver.iteration, solver.sim_time, timestep, max_w))
     except:
         logger.error('Exception raised, triggering end of main loop.')
         raise
     finally:
         solver.log_stats()
 
-    bfc = b.allgather_data('c')
-
-    return (bic.flatten(), bfc.flatten())
+    ufc = plt.imshow(np.linalg.norm(u['g'], axis=0))
+    ufc = np.linalg.norm(u['c'].copy(), axis=0)    
+    return (uic.flatten(), ufc.flatten())
 
 
 if __name__ == "__main__":
@@ -147,11 +136,11 @@ if __name__ == "__main__":
 
     pde_to_func = {
         "poisson":  solve_poisson,
-        "rayleigh": solve_rayleigh,
+        "rayleigh": solve_flow,
     }
 
     fs, us = [], []
-    N = 1
+    N = 1_000
     for _ in range(N):
         f, u = pde_to_func[args.pde]()
         fs.append(f) 
@@ -159,6 +148,6 @@ if __name__ == "__main__":
     fs = np.array(fs)
     us = np.array(us)
 
-    os.makedirs(utils.PDE_DIR(args.pde))
+    os.makedirs(utils.PDE_DIR(args.pde), exist_ok=True)
     with open(utils.DATA_FN(args.pde), "wb") as f:
         pickle.dump((fs, us), f)
