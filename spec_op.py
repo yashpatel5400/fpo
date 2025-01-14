@@ -41,15 +41,44 @@ def get_data(pde):
     return fs, us
 
 
+def cartesian_product(*arrays):
+    la = len(arrays)
+    dtype = np.result_type(*arrays)
+    arr = np.empty([len(a) for a in arrays] + [la], dtype=dtype)
+    for i, a in enumerate(np.ix_(*arrays)):
+        arr[...,i] = a
+    return arr.reshape(-1, la)
+
+
+def get_sobolev_weights(s, gamma, shape):
+    coords = cartesian_product(
+        np.array(range(shape[0])), 
+        np.array(range(shape[1]))
+    ).reshape((shape[0], shape[1], 2))
+    ks = np.sum(coords, axis=-1)
+    d = len(shape)
+    return (1 + ks ** (2 * d)) ** (s - gamma)
+
+
+def sobolev_loss(uhat, u, weight, loss_type="sobolev"):
+    if loss_type == "l2":
+        return torch.mean((uhat - u) ** 2)
+    return torch.mean((weight * (uhat - u) ** 2))
+                      
+
 def train_model(pde, fs, us):
     net  = SpecOp(fs.shape[-1], us.shape[-1])
     loss = nn.MSELoss()
     opt  = torch.optim.Adam(net.parameters())
     net = net.to("cuda")
 
-    batch_size  = 25
+    # sobolev_weight = get_sobolev_weights(s=2, gamma=1.9, shape=(fs.shape[1],fs.shape[2]))
+    # sobolev_weight = torch.from_numpy(sobolev_weight).to("cuda")
+    sobolev_weight = None
+
+    batch_size = 25
     num_batches = fs.shape[0] // batch_size
-    epochs = 100
+    epochs = 500
 
     losses = []
     for epoch in range(epochs):
@@ -58,7 +87,7 @@ def train_model(pde, fs, us):
             u_batch = us[batch * batch_size:(batch+1) * batch_size]
 
             u_hat = net(f_batch)
-            loss_val = loss(u_hat, u_batch)
+            loss_val = sobolev_loss(u_hat, u_batch, sobolev_weight, loss_type="l2")
             
             opt.zero_grad()
             loss_val.backward()
