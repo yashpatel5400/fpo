@@ -130,11 +130,8 @@ def solve_poisson():
     # Forcing
     f = dist.Field(name='f', bases=(xbasis, ybasis))
     
-    nx, ny  = 256, 256
-    lx, ly  = 5.0, 5.0
-    scaGen2D = ScalarGenerator2D((lx, ly), (nx, ny))
-
     # HACK: for some reason, the first "sample" is just zeros, so generate 2 and use the second
+    scaGen2D = ScalarGenerator2D(size=(Lx, Ly), nCell=(Nx, Ny), nKnot=(8,8))
     f_val    = scaGen2D.generate_scalar2d(2, valMin=-10.0, valMax=10.0, periodic=True)
     f['g'] = f_val[-1]
 
@@ -313,7 +310,6 @@ def solve_qgniw():
     delx = Lx/Nx; dely = Ly/Ny
 
     uic = zeta['c'].copy()
-    print(uic.shape)
     try:
         logger.info('Starting main loop')
         solver.step(timestep)

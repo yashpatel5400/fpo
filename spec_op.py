@@ -70,19 +70,6 @@ class SpecOp(nn.Module):
         x = self.encoder(x)
         x = self.decoder(x)
         return x
-    
-
-def get_data(pde):
-    with open(utils.DATA_FN(pde), "rb") as f:
-        (fs, us) = pickle.load(f)
-
-    prop_train = 0.75
-    N = fs.shape[0]
-    N_train = int(N * prop_train)
-
-    fs = torch.from_numpy(fs[:N_train]).to(torch.float32).to("cuda")
-    us = torch.from_numpy(us[:N_train]).to(torch.float32).to("cuda")
-    return fs, us
 
 
 def cartesian_product(*arrays):
@@ -148,6 +135,6 @@ if __name__ == "__main__":
     parser.add_argument("--pde")
     args = parser.parse_args()
 
-    fs, us = get_data(args.pde)
+    fs, us = utils.get_data(args.pde, train=True)
     dataset = PDEDataset(fs, us)
     train_model(args.pde, dataset)
