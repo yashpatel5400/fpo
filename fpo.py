@@ -1,10 +1,11 @@
 import argparse
 import einops
-import pickle
+import os
 import torch
 
 import dedalus.public as d3
 import matplotlib.pyplot as plt
+import pandas as pd
 import numpy as np
 from scipy import signal
 import matplotlib.pyplot as plt
@@ -187,20 +188,19 @@ def eval(field_coeff, radius, w, Lx, Ly):
 
 def fpo_trial(u_c, u_c_hat, radius):
     Lx, Ly = 2 * np.pi, 2 * np.pi
-    experiments = {
+    w_stars = {
         "Truth": solve_nominal(u_c, radius, Lx, Ly),
         "Nominal": solve_nominal(u_c_hat, radius, Lx, Ly),
         "Robust": solve_robust(u_c_hat, radius, Lx, Ly),
     }
-
-    for experiment in experiments:
-        J = eval(u_c, radius, experiments[experiment], Lx, Ly)
-        print(f"J_{experiment} : {J}")
+    Js = {experiment : [eval(u_c, radius, w_stars[experiment], Lx, Ly)] for experiment in w_stars}
+    return Js
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--pde")
+    parser.add_argument("--sample", type=int)
     args = parser.parse_args()
 
     fs, us = utils.get_data(args.pde, train=False)
@@ -208,8 +208,12 @@ if __name__ == "__main__":
     model.load_state_dict(torch.load(utils.MODEL_FN(args.pde), weights_only=True))
     model.eval().to("cuda")
 
-    sample_idx = 0
-    f_c = fs[sample_idx].reshape((256,256))
-    u_c = us[sample_idx].reshape((256,256)).detach().cpu().numpy().copy()
+    f_c = fs[args.sample].reshape((256,256))
+    u_c = us[args.sample].reshape((256,256)).detach().cpu().numpy().copy()
     u_c_hat = model(f_c.unsqueeze(0).unsqueeze(0).to("cuda").to(torch.float32)).reshape((256,256)).detach().cpu().numpy().copy()
-    fpo_trial(u_c, u_c_hat, radius=15)
+    
+    os.makedirs(utils.RESULTS_DIR(args.pde), exist_ok=True)
+    results_fn = os.path.join(utils.RESULTS_DIR(args.pde), f"{args.sample}.csv")
+    results = fpo_trial(u_c, u_c_hat, radius=15)
+    results_df = pd.DataFrame.from_dict(results)
+    results_df.to_csv(results_fn)
