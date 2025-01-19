@@ -4,7 +4,7 @@ import torch
 
 PDE_DIR     = lambda pde : os.path.join("data", pde)
 RESULTS_DIR = lambda pde : os.path.join("results", pde)
-DATA_FN     = lambda pde : os.path.join(PDE_DIR(pde), "data_old.pkl")
+DATA_FN     = lambda pde : os.path.join(PDE_DIR(pde), "data.pkl")
 MODEL_FN    = lambda pde : os.path.join(PDE_DIR(pde), "model.pt")
 
 

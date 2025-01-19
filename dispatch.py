@@ -8,7 +8,7 @@ import utils
 def main(results_dir):
     server = libtmux.Server()
 
-    for sample_idx in range(75,100):
+    for sample_idx in range(0,25):
         result_fn = os.path.join(results_dir, f"{sample_idx}.csv")
         if os.path.exists(result_fn):
             continue
@@ -17,7 +17,7 @@ def main(results_dir):
         session = server.get_by_id(f'${len(server.sessions)-1}')
         p = session.attached_pane
         p.send_keys("conda activate spectral", enter=True)
-        cmd = f"python fpo.py --pde poisson --sample {sample_idx}"
+        cmd = f"python fpo.py --pde navier_stokes --sample {sample_idx}"
         p.send_keys(cmd, enter=True)
         print(f"{cmd}")
 
