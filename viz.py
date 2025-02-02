@@ -32,8 +32,6 @@ plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
 plt.rc('legend', fontsize=BIGGER_SIZE)    # legend fontsize
 plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
-sns.set_theme()
-
 def cartesian_product(*arrays):
     la = len(arrays)
     dtype = np.result_type(*arrays)
@@ -109,7 +107,6 @@ def get_reference_field():
 
 
 def compute_robust_field(u_hat, Lx, Ly, Nx, Ny, radius, cutoff):
-    print(u_hat.shape)
     # --- Setup --- #
     diam = 2 * radius + 1
     coords = cartesian_product(
@@ -196,12 +193,19 @@ def compute_robust_field(u_hat, Lx, Ly, Nx, Ny, radius, cutoff):
     return rob_vals.reshape((len(w0), len(w1)))
 
 
-def viz_fields(pde, u, u_hat, u_rob):
+def viz_fields(pde, u_c, u_c_hat, u_rob):
+    u = get_reference_field()
+    u["c"] = u_c
+    u_g = u["g"].copy()
+
+    u["c"] = u_c_hat
+    u_g_hat = u["g"].copy()
+
     fig, axs = plt.subplots(1, 3, figsize=(15, 5))  
-    axs[0].imshow(u)
+    axs[0].imshow(u_g)
     axs[0].set_title(r"$u \mathrm{\ Field}$")
     
-    axs[1].imshow(u_hat)
+    axs[1].imshow(u_g_hat)
     axs[1].set_title(r"$\widehat{u} \mathrm{\ Field}$")
     
     axs[2].imshow(u_rob)
