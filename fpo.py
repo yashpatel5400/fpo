@@ -14,6 +14,7 @@ from matplotlib.patches import Circle
 from spec_op import SpecOp
 import utils
 
+device = "cuda:0"
 
 def cartesian_product(*arrays):
     la = len(arrays)
@@ -118,7 +119,7 @@ def viz_results(field, w_star, w_nom, w_rob):
     plt.imsave("result.png")
 
 
-def solve_robust(field_coeff, radius, Lx, Ly):
+def solve_robust(field_coeff, radius, Lx, Ly, cutoff):
     # --------- Problem setup --------- #
     Nx, Ny = field_coeff.shape
     basis_fields = get_basis_fields(Lx, Ly, Nx, Ny)
@@ -139,25 +140,26 @@ def solve_robust(field_coeff, radius, Lx, Ly):
     s = 2     # smoothness of PDE (s-Sobolev space)
     gamma = 1 # gamma defines CP norm; must be between [1,...,s-1] from theory
 
-    lambda_ = 20
+    lambda_ = 20.0
     k_norms = np.linalg.norm(modes, axis=-1, ord=1)
     norm_factor = 1 / (2 * lambda_ * (1 + (k_norms) ** (2 * d)) ** (s - gamma))
 
     w = solve_nominal(field_coeff, radius, Lx, Ly) # initialize with nominal solution
     ws = [w]
     field_g_robs = []
+    basis_fields_cut = basis_fields[:cutoff,:cutoff]
 
     for t in range(T):
-        # have to do with np.take to get wrapped behavior for torus
-        # tmp     = basis_grids.take(range(w[0] - window_size[0],w[0] + window_size[0] + 1), mode='wrap', axis=2)
-        # windows = tmp.take(range(w[1] - window_size[1],w[1] + window_size[1] + 1), mode='wrap', axis=3)
         window_size = np.array(collection_well.shape) // 2
-        windows = basis_fields[...,w[0] - window_size[0]:w[0] + window_size[0] + 1,w[1] - window_size[1]:w[1] + window_size[1] + 1]
+        windows = basis_fields_cut[...,w[0] - window_size[0]:w[0] + window_size[0] + 1,w[1] - window_size[1]:w[1] + window_size[1] + 1]
         scaled_windows = windows * np.expand_dims(np.expand_dims(collection_well, axis=0), axis=0)
         Phi_w = einops.reduce(scaled_windows, "k1 k2 x y -> k1 k2", "sum")
 
-        field_c_delta = Phi_w * norm_factor
-        field["c"] = field_coeff - field_c_delta
+        field_c_delta = Phi_w * norm_factor[:cutoff,:cutoff]
+        field_coeff_adv = field_coeff.copy()
+        field_coeff_adv[:cutoff,:cutoff] -= field_c_delta
+        
+        field["c"] = field_coeff_adv
         field_g_rob = field["g"].copy()
         field_g_robs.append(field_g_rob)
 
@@ -186,12 +188,12 @@ def eval(field_coeff, radius, w, Lx, Ly):
     return np.sum(window * collection_well)
 
 
-def fpo_trial(u_c, u_c_hat, radius):
+def fpo_trial(u_c, u_c_hat, radius, cutoff):
     Lx, Ly = 2 * np.pi, 2 * np.pi
     w_stars = {
         "Truth": solve_nominal(u_c, radius, Lx, Ly),
         "Nominal": solve_nominal(u_c_hat, radius, Lx, Ly),
-        "Robust": solve_robust(u_c_hat, radius, Lx, Ly),
+        "Robust": solve_robust(u_c_hat, radius, Lx, Ly, cutoff),
     }
     Js = {experiment : [eval(u_c, radius, w_stars[experiment], Lx, Ly)] for experiment in w_stars}
     return Js
@@ -201,19 +203,25 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--pde")
     parser.add_argument("--sample", type=int)
+    parser.add_argument("--cutoff", type=int, default=8)
     args = parser.parse_args()
 
     fs, us = utils.get_data(args.pde, train=False)
-    model = SpecOp().to("cuda")
+    if   args.pde == "poisson":        model = SpecOp(cutoff=args.cutoff).to(device)
+    elif args.pde == "navier_stokes":  model = SpecOp(cutoff=args.cutoff).to(device)
+
     model.load_state_dict(torch.load(utils.MODEL_FN(args.pde), weights_only=True))
     model.eval().to("cuda")
 
     f_c = fs[args.sample].reshape((256,256))
     u_c = us[args.sample].reshape((256,256)).detach().cpu().numpy().copy()
-    u_c_hat = model(f_c.unsqueeze(0).unsqueeze(0).to("cuda").to(torch.float32)).reshape((256,256)).detach().cpu().numpy().copy()
-    
+
+    u_c_hat = model(f_c.unsqueeze(0).unsqueeze(0).to("cuda").to(torch.float32)[...,:args.cutoff,:args.cutoff]).reshape((args.cutoff,args.cutoff)).detach().cpu().numpy().copy()
+    u_c_hat2 = np.zeros(u_c.shape)
+    u_c_hat2[:args.cutoff,:args.cutoff] = u_c_hat
+
     os.makedirs(utils.RESULTS_DIR(args.pde), exist_ok=True)
     results_fn = os.path.join(utils.RESULTS_DIR(args.pde), f"{args.sample}.csv")
-    results = fpo_trial(u_c, u_c_hat, radius=15)
+    results = fpo_trial(u_c, u_c_hat2, radius=10, cutoff=args.cutoff)
     results_df = pd.DataFrame.from_dict(results)
     results_df.to_csv(results_fn)

@@ -30,45 +30,104 @@ class PDEDataset(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
 
+
+class ResBlock(nn.Module):
+    """
+    A basic residual block: Conv -> BN -> ReLU -> Conv -> BN -> skip connection
+    """
+    def __init__(self, channels):
+        super(ResBlock, self).__init__()
+        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(channels)
+
+    def forward(self, x):
+        identity = x
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        # Residual/skip connection
+        out += identity
+        out = self.relu(out)
+        return out
+
+
 class SpecOp(nn.Module):
     """
-    A simple CNN-based encoder-decoder.
+    More complex encoder-decoder architecture for Navier Stokes operator. Necessary to achieve decent results in
+    Navier Stokes mapping
     - Input:  1×256×256
     - Output: 1×256×256
     """
-    def __init__(self):
+    def __init__(self, cutoff=8):
         super(SpecOp, self).__init__()
-        
-        # Encoder: downsample
-        self.encoder = nn.Sequential(
-            nn.Conv2d(1, 8, kernel_size=3, padding=1),    # [B, 8, 256, 256]
-            nn.BatchNorm2d(8),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(8, 16, kernel_size=3, padding=1),   # [B, 16, 256, 256]
-            nn.BatchNorm2d(16),
-            nn.ReLU(inplace=True),
-            nn.Dropout(p=0.1),                           # Slight dropout
-            nn.MaxPool2d(2),                              # [B, 16, 128, 128]
-            
-            nn.Conv2d(16, 32, kernel_size=3, padding=1),  # [B, 32, 128, 128]
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.Dropout(p=0.1),
-            nn.MaxPool2d(2),                              # [B, 32, 64, 64]
-        )
+    
+        self.cutoff = cutoff
 
-        # Decoder: upsample
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(32, 16, kernel_size=2, stride=2),  # [B, 16, 128, 128]
-            nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(16, 8, kernel_size=2, stride=2),   # [B, 8, 256, 256]
-            nn.ReLU(inplace=True),
-            nn.Conv2d(8, 1, kernel_size=3, padding=1),            # [B, 1, 256, 256]
-        )
+        # ----------------
+        # Encoder
+        # ----------------
+        # (1) Initial conv: 1->8
+        self.enc_conv1 = nn.Conv2d(in_channels=1, out_channels=8, kernel_size=3, padding=1)
+        self.enc_bn1 = nn.BatchNorm2d(8)
+        self.enc_relu1 = nn.ReLU(inplace=True)
+
+        # (2) Residual block (8 channels)
+        self.resblock1 = ResBlock(channels=8)
+
+        # (3) Downsample cutoff->cutoff/2 by stride=2 (8->16 channels)
+        self.enc_conv2 = nn.Conv2d(in_channels=8, out_channels=16, kernel_size=3, stride=2, padding=1)
+        self.enc_bn2 = nn.BatchNorm2d(16)
+        self.enc_relu2 = nn.ReLU(inplace=True)
+
+        # (4) Residual block (16 channels)
+        self.resblock2 = ResBlock(channels=16)
+
+        # ----------------
+        # Decoder
+        # ----------------
+        # (1) Upsample cutoff/2->cutoff, 16->8 channels
+        self.dec_convT1 = nn.ConvTranspose2d(in_channels=16, out_channels=8, kernel_size=2, stride=2)
+        self.dec_bn1 = nn.BatchNorm2d(8)
+        self.dec_relu1 = nn.ReLU(inplace=True)
+
+        # (2) Residual block (8 channels)
+        self.resblock3 = ResBlock(channels=8)
+
+        # (3) Final conv to get single-channel output
+        self.dec_conv_out = nn.Conv2d(in_channels=8, out_channels=1, kernel_size=3, padding=1)
+        # Optionally, add nn.Sigmoid() if you want output in [0,1].
 
     def forward(self, x):
-        x = self.encoder(x)
-        x = self.decoder(x)
+        # Expect x.shape == (B, 1, cutoff, cutoff).
+
+        # ------------- ENCODER -------------
+        x = self.enc_conv1(x)      # (B, 8, cutoff, cutoff)
+        x = self.enc_bn1(x)
+        x = self.enc_relu1(x)
+
+        x = self.resblock1(x)      # (B, 8, cutoff, cutoff)
+
+        x = self.enc_conv2(x)      # (B, 16, cutoff/2, cutoff/2)
+        x = self.enc_bn2(x)
+        x = self.enc_relu2(x)
+
+        x = self.resblock2(x)      # (B, 16, cutoff/2, cutoff/2)
+
+        # ------------- DECODER -------------
+        x = self.dec_convT1(x)     # (B, 8, cutoff, cutoff)
+        x = self.dec_bn1(x)
+        x = self.dec_relu1(x)
+
+        x = self.resblock3(x)      # (B, 8, cutoff, cutoff)
+
+        x = self.dec_conv_out(x)   # (B, 1, cutoff, cutoff)
         return x
 
 
@@ -97,10 +156,11 @@ def sobolev_loss(uhat, u, weight, loss_type="sobolev"):
     return torch.mean((weight * (uhat - u) ** 2))
                       
 
-def train_model(pde, dataset, num_epochs=100, batch_size=4, lr=1e-3, device='cuda'):
+def train_model(pde, dataset, cutoff, num_epochs=600, batch_size=25, lr=1e-3, device='cuda'):
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-    model = SpecOp().to(device)
+    if   pde == "poisson":        model = SpecOp(cutoff=cutoff).to(device)
+    elif pde == "navier_stokes":  model = SpecOp(cutoff=cutoff).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = nn.MSELoss()
 
@@ -111,6 +171,8 @@ def train_model(pde, dataset, num_epochs=100, batch_size=4, lr=1e-3, device='cud
         
         for inputs, targets in dataloader:
             inputs, targets = inputs.to(device), targets.to(device)
+            inputs = inputs[...,:cutoff,:cutoff]
+            targets = targets[...,:cutoff,:cutoff]
 
             # Forward pass
             outputs = model(inputs)
@@ -133,8 +195,9 @@ def train_model(pde, dataset, num_epochs=100, batch_size=4, lr=1e-3, device='cud
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--pde")
+    parser.add_argument("--cutoff", type=int, default=8)
     args = parser.parse_args()
 
     fs, us = utils.get_data(args.pde, train=True)
     dataset = PDEDataset(fs, us)
-    train_model(args.pde, dataset)
+    train_model(args.pde, dataset, args.cutoff)

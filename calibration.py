@@ -108,10 +108,19 @@ def sobolev_cp_cov(u_hat, u_cal, K, s, gamma, alphas=[0.05], cal_size=150):
 
 
 def calibrate(pde):
+    fs, us = utils.get_data(pde, train=False)
+    f_c = fs[args.sample].reshape((256,256))
+    u_c = us[args.sample].reshape((256,256)).detach().cpu().numpy().copy()
+
+    cutoff = 8
+    u_c_hat = model(f_c.unsqueeze(0).unsqueeze(0).to("cuda").to(torch.float32)[...,:cutoff,:cutoff]).reshape((cutoff,cutoff)).detach().cpu().numpy().copy()
+    u_c_hat2 = np.zeros(u_c.shape)
+    u_c_hat2[:cutoff,:cutoff] = u_c_hat
+
     with open(utils.DATA_FN(pde), "rb") as f:
         (fs, us) = pickle.load(f)
 
-    net  = SpecOp(fs.shape[-1], us.shape[-1])
+    net  = SpecOp()
     net.load_state_dict(torch.load(utils.MODEL_FN(pde), weights_only=True))
     net.eval().to("cuda")
 

@@ -12,7 +12,7 @@ def get_data(pde, train):
     with open(DATA_FN(pde), "rb") as f:
         (fs, us) = pickle.load(f)
 
-    prop_train = 0.75
+    prop_train = 0.25
     N = fs.shape[0]
     N_train = int(N * prop_train)
 

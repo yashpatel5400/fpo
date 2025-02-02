@@ -23,151 +23,7 @@ import utils
 logger = logging.getLogger(__name__)
 device = "cuda:0"
 
-class ScalarGenerator2D:
-    def __init__(self, size=(1.0, 1.0), nCell=(32, 32), nKnot=(4, 4)):
-        assert len(size) == 2 and len(nCell) == 2 and len(nKnot) == 2
-        assert size[0]/nCell[0] == size[1]/nCell[1]
-        # input arguments
-        self.nCell  = nCell
-        self.size   = size
-        self.nKnot  = nKnot
 
-        # module constants
-        self.lenScale = 1.0
-
-        # knots info for GP
-        xKnot = np.linspace(0.0, self.size[0], self.nKnot[0])
-        yKnot = np.linspace(0.0, self.size[1], self.nKnot[1])
-        xKnot, yKnot = np.meshgrid(xKnot, yKnot)
-        # list of knot's (x, y)
-        xyKnot = np.stack([xKnot.flatten(), yKnot.flatten()], axis=-1)
-        # squared distance of each knot pair
-        knotDistMat = distance.cdist(xyKnot, xyKnot, 'sqeuclidean')
-        # knot's colvariance matrix
-        knotCovMat    = np.exp(-knotDistMat / self.lenScale)
-        self.knotCovMatInv = np.linalg.inv(knotCovMat)
-
-        # setup the output scalar's coordinates and matrix for GP
-        h      = self.size[0] / self.nCell[0]
-        x      = [(i+0.5)*h for i in range(self.nCell[0])]
-        y      = [(i+0.5)*h for i in range(self.nCell[1])]
-        x, y   = np.meshgrid(x, y)
-        # list of coordinates
-        xy     = np.stack([x.flatten(), y.flatten()], axis=-1)
-        # colvariance matrix for grid cells and knots
-        self.covMat = distance.cdist(xy, xyKnot, 'sqeuclidean')
-        self.covMat = np.exp(-self.covMat / self.lenScale)
-
-        # values at the boundary cells' face centers
-        xyBc   = np.zeros((2*np.sum(self.nCell), 2))
-        nx, ny = self.nCell[0], self.nCell[1]
-        # i- boundary
-        xyBc[:nx, 0] = np.array([(j+0.5)*h for j in range(nx)])
-        # j+ boundary
-        xyBc[nx:nx+ny, 0] = size[0]
-        xyBc[nx:nx+ny, 1] = np.array([(i+0.5)*h for i in range(ny)])
-        # i+ boundary
-        xyBc[nx+ny:2*nx+ny, 0] = np.flip(np.array([(j+0.5)*h for j in range(nx)]))
-        xyBc[nx+ny:2*nx+ny, 1] = self.size[1]
-        # j- boundary
-        xyBc[2*nx+ny:, 1] = np.flip(np.array([(i+0.5)*h for i in range(ny)]))
-        # colvariance matrix for boundary face centers and knots
-        self.covMatBc = distance.cdist(xyBc, xyKnot, 'sqeuclidean')
-        self.covMatBc = np.exp(-self.covMatBc / self.lenScale)
-
-    def generate_scalar2d(self, nSample, valMin=0.0, valMax=1.0, outputBc=False,
-                            strictMin=False, periodic=0):
-        # create sobol sequence
-        pow      = int(np.log2(self.nKnot[0]*self.nKnot[1]*nSample)) + 1
-        sobolSeq = qmc.Sobol(d=1).random_base2(m=pow)
-        sobolSeq = sobolSeq * (valMax - valMin) + valMin
-        np.random.shuffle(sobolSeq)
-
-        # allocate the scalars
-        samples = np.zeros((nSample, self.nCell[1], self.nCell[0]))
-        if outputBc:
-          bcs = np.zeros((nSample, 2*np.sum(self.nCell)))
-
-        # generate the scalar with GP
-        # R.B.Gramacy P148, Eqn 5.2
-        s, e = 0, 0
-        for i in range(nSample):
-          if periodic:
-            period = 30
-            A = 2*math.pi/period
-            if i%period == 0:
-              s, e = e, e + self.nKnot[0] * self.nKnot[1]
-            knots = copy.deepcopy(sobolSeq[s:e])
-            knots *= (math.sin(i/A-math.pi/2)+1) / 2
-          else:
-            s, e  = e, e + self.nKnot[0] * self.nKnot[1]
-            knots = sobolSeq[s:e]
-          # interpolate one scalar with GP
-          sca            = np.matmul(self.covMat, np.dot(self.knotCovMatInv, knots))
-          samples[i,...] = np.reshape(sca, self.nCell)
-          if outputBc:
-            bc           = np.matmul(self.covMatBc, np.dot(self.knotCovMatInv, knots))
-            bcs[i,:]     = np.squeeze(bc)
-
-        if strictMin:
-          scalarMin = min(np.min(bcs), np.min(samples))
-          samples   = samples - scalarMin + valMin
-          bcs       = bcs     - scalarMin + valMin
-
-        if outputBc:
-          return samples, bcs
-
-        return samples
-
-
-def solve_poisson_trial():
-    # Parameters
-    Lx, Ly = 2 * np.pi, 2 * np.pi
-    Nx, Ny = 256, 256
-    dtype = np.float64
-
-    # Bases
-    coords = d3.CartesianCoordinates("x", "y")
-    dist   = d3.Distributor(coords, dtype=dtype)
-    xbasis = d3.RealFourier(coords["x"], size=Nx, bounds=(0, Lx))
-    ybasis = d3.RealFourier(coords["y"], size=Ny, bounds=(0, Ly))
-
-    # Fields
-    u = dist.Field(name='u', bases=(xbasis, ybasis))
-    tau_u = dist.Field(name='tau_u')
-
-    # Forcing
-    f = dist.Field(name='f', bases=(xbasis, ybasis))
-    
-    # HACK: for some reason, the first "sample" is just zeros, so generate 2 and use the second
-    scaGen2D = ScalarGenerator2D(size=(Lx, Ly), nCell=(Nx, Ny), nKnot=(8,8))
-    f_val    = scaGen2D.generate_scalar2d(2, valMin=-10.0, valMax=10.0, periodic=True)
-    f['g'] = f_val[-1]
-
-    # Problem
-    problem = d3.LBVP([u, tau_u], namespace=locals())
-    problem.add_equation("lap(u) + tau_u = f")
-    problem.add_equation("integ(u) = 0")
-
-    # Solver
-    solver = problem.build_solver()
-    solver.solve()
-
-    uc = u.allgather_data('c')
-    
-    return (f['c'].flatten(), uc.flatten())
-
-
-def solve_poisson(N):
-    fs, us = [], []
-    for _ in range(N):
-        f, u = solve_poisson_trial()
-        fs.append(f) 
-        us.append(u)
-    return np.array(fs), np.array(us)
-
-
-# ------ Somewhat redundant, but slightly different GP processor for generating NS data ----- #
 class GaussianRF(object):
     """
     Represents a Gaussian Random Field generator.
@@ -262,6 +118,74 @@ class GaussianRF(object):
         coeff = self.sqrt_eig * coeff
 
         return torch.fft.ifftn(coeff, dim=list(range(-1, -self.dim - 1, -1))).real
+
+def solve_poisson_trial():
+    # Parameters
+    Lx, Ly = 2 * np.pi, 2 * np.pi
+    Nx, Ny = 256, 256
+    dtype = np.float64
+
+    # Bases
+    coords = d3.CartesianCoordinates("x", "y")
+    dist   = d3.Distributor(coords, dtype=dtype)
+    xbasis = d3.RealFourier(coords["x"], size=Nx, bounds=(0, Lx))
+    ybasis = d3.RealFourier(coords["y"], size=Ny, bounds=(0, Ly))
+
+    # Fields
+    u = dist.Field(name='u', bases=(xbasis, ybasis))
+    tau_u = dist.Field(name='tau_u')
+
+    # Forcing
+    f = dist.Field(name='f', bases=(xbasis, ybasis))
+    
+    GRF = GaussianRF(2, Nx, alpha=4.5, tau=7, device=device)
+    a = GRF.sample(1)[0].detach().cpu().numpy()
+
+    # Grid size
+    N = 256
+
+    # Create normalized coordinate arrays [0,1] x [0,1]
+    x = np.linspace(0, 1, N)
+    y = np.linspace(0, 1, N)
+
+    # Create a meshgrid (X, Y) for evaluating the function on the entire 2D domain
+    X, Y = np.meshgrid(x, y, indexing='xy')
+    
+    n_points = 6
+    radius   = 0.3
+    angles   = [k * 2 * np.pi / n_points for k in range(n_points)]
+    centers  = np.array([0.5 + radius * np.array([np.cos(angle), np.sin(angle)]) for angle in angles])
+
+    (cx,cy) = centers[np.random.randint(low=1, high=len(centers))]
+    sigma = 0.25
+    Z = np.exp(-(((X - cx)**2 + (Y - cy)**2) / (2 * sigma**2)))
+    b = Z * 0.5
+    
+    f_val = a - b
+
+    f['g'] = f_val#[-1]
+
+    # Problem
+    problem = d3.LBVP([u, tau_u], namespace=locals())
+    problem.add_equation("lap(u) + tau_u = f")
+    problem.add_equation("integ(u) = 0")
+
+    # Solver
+    solver = problem.build_solver()
+    solver.solve()
+
+    uc = u.allgather_data('c')
+    
+    return (f['c'].flatten(), uc.flatten())
+
+
+def solve_poisson(N):
+    fs, us = [], []
+    for _ in range(N):
+        f, u = solve_poisson_trial()
+        fs.append(f) 
+        us.append(u)
+    return np.array(fs), np.array(us)
     
 
 # Function to solve Navier-Stokes equation in 2D
@@ -381,9 +305,33 @@ def solve_navier_stokes(N):
     t = torch.linspace(0, 1, s+1, device=device)
     t = t[0:-1]
 
-    # Forcing function: 0.1*(sin(2pi(x+y)) + cos(2pi(x+y)))
-    X,Y = torch.meshgrid(t, t, indexing='ij')
-    f = 0.1 * (torch.sin(2*math.pi*(X + Y)) + torch.cos(2*math.pi*(X + Y)))
+    GRF = GaussianRF(2, s, alpha=4.5, tau=7, device=device)
+    a = GRF.sample(1)[0].detach().cpu().numpy()
+
+    # Grid size
+    N = 256
+
+    # Create normalized coordinate arrays [0,1] x [0,1]
+    x = np.linspace(0, 1, N)
+    y = np.linspace(0, 1, N)
+
+    # Create a meshgrid (X, Y) for evaluating the function on the entire 2D domain
+    X, Y = np.meshgrid(x, y, indexing='xy')
+    
+    n_points = 6
+    radius   = 0.3
+    angles   = [k * 2 * np.pi / n_points for k in range(n_points)]
+    centers  = np.array([0.5 + radius * np.array([np.cos(angle), np.sin(angle)]) for angle in angles])
+
+    (cx,cy) = centers[np.random.randint(low=1, high=len(centers))]
+
+    # Standard deviation (spread) for the Gaussian peaks
+    sigma = 0.25
+
+    Z = np.exp(-(((X - cx)**2 + (Y - cy)**2) / (2 * sigma**2)))
+    # b = Z * .25
+    
+    f = torch.from_numpy(Z).to(device) * 0.1
 
     #Number of snapshots from solution
     record_steps = 200
