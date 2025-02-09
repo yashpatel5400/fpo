@@ -17,6 +17,8 @@ import seaborn as sns
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
+from complex_spec_op import construct_dataset, EncoderDecoderNet
+
 sns.set_theme()
 
 mpl.rcParams['text.usetex'] = True
@@ -37,165 +39,174 @@ plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
 plt.rc('legend', fontsize=BIGGER_SIZE)    # legend fontsize
 plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
-class SpecOp(nn.Module):
-    def __init__(self, k_in, k_out):
-        super().__init__()
+device = "cuda:0"
 
-        hidden_features = 16
-        self.linear1 = nn.Linear(k_in, hidden_features)
-        self.linear2 = nn.Linear(hidden_features, hidden_features)
-        self.linear3 = nn.Linear(hidden_features, k_out)
+def sobolev_norm_2d_full_batch(f_hat_full_batch, s: float):
+    """
+    Vectorized Sobolev norm for a batch of full complex Fourier arrays in unshifted order.
 
-    def forward(self, x):
-        x = self.linear1(x)
-        x = F.relu(x)
-        x = self.linear2(x)
-        x = F.relu(x)
-        x = self.linear3(x)
-        return x
+    f_hat_full_batch: np.ndarray of shape (batch, Nx, Ny), dtype=complex
+      Each [i,:,:] is one sample's full Fourier array in unshifted order.
+    s: float, the Sobolev exponent.
+
+    Returns
+    -------
+    norms : np.ndarray of shape (batch,)
+      The H^s(T^2) norm for each sample.
+    """
+    batch_size, Nx, Ny = f_hat_full_batch.shape
+
+    # Precompute (1 + k1^2 + k2^2)^s for each (k1, k2) in unshifted indexing
+    # shape (Nx,Ny)
+    k1_vals = np.arange(Nx)
+    # shift negative frequencies
+    k1_vals[k1_vals > Nx//2] -= Nx
+    k2_vals = np.arange(Ny)
+    k2_vals[k2_vals > Ny//2] -= Ny
+
+    # Build 2D mesh
+    K1, K2 = np.meshgrid(k1_vals, k2_vals, indexing='ij')  # shape (Nx, Ny)
+
+    k_sq = K1**2 + K2**2  # shape (Nx, Ny)
+    factor = (1.0 + k_sq)**s  # shape (Nx,Ny)
+
+    # We'll do sum_{k1,k2} factor * |f_hat|^2 for each sample
+    # f_hat_full_batch has shape (batch,Nx,Ny), factor has shape (Nx,Ny).
+    # We want to multiply each sample by factor and sum.
+
+    # absolute value squared
+    abs_sq = np.abs(f_hat_full_batch)**2  # shape (batch,Nx,Ny)
+
+    # multiply
+    # shape (batch,Nx,Ny)
+    weighted = abs_sq * factor  # broadcasting factor (Nx,Ny) over batch dimension
+
+    # sum over Nx,Ny
+    sums = np.sum(weighted, axis=(1,2))  # shape (batch,)
+
+    # final norm is sqrt
+    norms = np.sqrt(sums)
+    return norms
 
 
-def cartesian_product(*arrays):
-    la = len(arrays)
-    dtype = np.result_type(*arrays)
-    arr = np.empty([len(a) for a in arrays] + [la], dtype=dtype)
-    for i, a in enumerate(np.ix_(*arrays)):
-        arr[...,i] = a
-    return arr.reshape(-1, la)
+def rfft2_to_fft2(rfft_result, input_shape):
+    """
+    Converts the result of numpy.fft.rfft2 to the equivalent result of numpy.fft.fft2.
+
+    Args:
+        rfft_result (numpy.ndarray): The result of numpy.fft.rfft2.
+        input_shape (tuple): The shape of the original input array to rfft2.
+
+    Returns:
+        numpy.ndarray: The equivalent result of numpy.fft.fft2.
+    """
+    N, rows, cols = (rfft_result.shape[0], input_shape[0], input_shape[1])
+    full_fft = np.zeros((N, rows, cols), dtype=np.complex128)
+    full_fft[:,:,:cols // 2 + 1] = rfft_result
+    full_fft[:,:,cols-1:cols // 2:-1]  = np.conjugate(rfft_result)[:,:,1:-1]
+    return full_fft
 
 
-def get_sobolev_weights(s, gamma, shape):
-    coords = cartesian_product(
-        np.array(range(shape[0])), 
-        np.array(range(shape[1]))
-    ).reshape((shape[0], shape[1], 2))
-    ks = np.sum(coords, axis=-1)
-    d = len(shape)
-    return (1 + ks ** (2 * d)) ** (s - gamma)
-
+def compute_scores(model, fs_full, us_full, K_trunc):
+    # Suppose fs_full, us_full are shape (N_full, 256,129), np.complex128
+    N_full = fs_full.shape[0]
     
-def sobolev_cp_cov(u_hat, u_cal, K, s, gamma, alphas=[0.05], cal_size=150):
-    alphas = np.array(alphas)
-    sobolev_scaling = get_sobolev_weights(s, gamma, u_hat.shape[1:])
-    K_full = 150
+    # 1) Convert to (N_full,2,256,129) float
+    fs_full_real = np.stack([fs_full.real, fs_full.imag], axis=1).astype(np.float32)
+    us_full_real = np.stack([us_full.real, us_full.imag], axis=1).astype(np.float32)
+
+    fs_full_torch = torch.from_numpy(fs_full_real).to(device)  # shape (N_full,2,256,129)
+    us_full_torch = torch.from_numpy(us_full_real).to(device)  # shape (N_full,2,256,129)
+
+    # 2) Evaluate model
+    model.eval()
+    with torch.no_grad():
+        uhat_full_torch = model(fs_full_torch)  # shape (N_full,2,256,129)
+
+    # 3) Convert predictions and ground truth to full Nx x Ny => shape (N_full,256,256)
+    uhat_full_np = uhat_full_torch.cpu().numpy()  # shape (N_full,2,256,129)
+    us_full_np   = us_full_torch.cpu().numpy()    # shape (N_full,2,256,129)
+    fs_full_np   = fs_full_torch.cpu().numpy()    # shape (N_full,2,256,129)
+
+    # We'll build the half-complex array back to shape (N_full,256,129) complex
+    uhat_half_complex = uhat_full_np[:,0] + 1j*uhat_full_np[:,1]  # shape (N_full,256,129)
+    us_half_complex   = us_full_np[:,0]   + 1j*us_full_np[:,1]    # shape (N_full,256,129)
+    fs_half_complex   = fs_full_np[:,0]   + 1j*fs_full_np[:,1]    # shape (N_full,256,129)
+
+    # Truncated field representations
+    uhat_half_complex_trunc = np.zeros(uhat_half_complex.shape).astype(np.complex128)
+    uhat_half_complex_trunc[...,:,:K_trunc] = uhat_half_complex[...,:,:K_trunc].copy()
+
+    us_half_complex_trunc = np.zeros(us_half_complex.shape).astype(np.complex128)
+    us_half_complex_trunc[...,:,:K_trunc] = us_half_complex[...,:,:K_trunc].copy()
+
+    fs_half_complex_trunc = fs_half_complex.copy()
+    fs_half_complex_trunc[...,:,:K_trunc] = 0
+
+    # 4) Differences in full Fourier domain
+    diffs_half_complex = uhat_half_complex - us_half_complex
+    diffs_half_complex_trunc = uhat_half_complex_trunc - us_half_complex_trunc
+
+    # Now we do rfft2_to_fft2 for each item. We'll vectorize by a loop or list comprehension:
+    # shape (N_full,256,256) complex
+    scores_full  = sobolev_norm_2d_full_batch(rfft2_to_fft2(diffs_half_complex, (256, 256)), s=1.0)
+    scores_trunc = sobolev_norm_2d_full_batch(rfft2_to_fft2(diffs_half_complex_trunc, (256, 256)), s=1.0)
+    margins  = 2 * sobolev_norm_2d_full_batch(rfft2_to_fft2(fs_half_complex_trunc, (256, 256)), s=-1.0)
     
-    full_sobolev_residual = (sobolev_scaling * (u_hat - u_cal) ** 2)[:,:K_full,:K_full]
-    full_sobolev_norm = full_sobolev_residual.reshape(-1, np.prod(full_sobolev_residual.shape[1:])).sum(axis=-1)
-    np.random.shuffle(full_sobolev_norm)
+    # 5) Sobolev norms => shape (N_full,)
+    return scores_full, scores_trunc, margins
+
+
+def calibrate(fs_full, us_full, model):
+    test_prop = 0.5
+    N_test = int(test_prop * len(fs_full))
+
+    truncations_to_coverages = {}
+    for K_trunc in range(4, 17, 4):
+        scores_full, scores_trunc, margins = compute_scores(model, fs_full, us_full, K_trunc=K_trunc)
+
+        scores_cal, scores_test_trunc = scores_trunc[:N_test], scores_trunc[N_test:]
+        _, scores_test_full = scores_full[:N_test], scores_full[N_test:]
+        _, margins_test = margins[:N_test], margins[N_test:]
+
+        alphas = np.arange(0.05, 0.951, 0.025)  # 0.05, 0.075, ... , 0.95
+        coverages_trunc, coverages_full = [], []
+        for alpha in alphas:
+            qval = np.quantile(scores_cal, 1 - alpha)  # 1 - alpha
+            coverages_trunc.append((scores_test_trunc < qval).sum() / len(scores_test_trunc))
+            coverages_full.append((scores_test_full < qval + margins_test).sum() / len(scores_test_full))
+        truncations_to_coverages[K_trunc] = coverages_full
     
-    full_cal_norms, full_test_norms = full_sobolev_norm[:cal_size], full_sobolev_norm[cal_size:]
-    q_hat_stars = np.quantile(full_cal_norms, 1-alphas)
+    plt.plot(alphas, alphas)
+    plt.plot(1 - alphas, coverages_trunc, label=r"$\mathrm{Truncated}$")
     
-    truncated_sobolev_residual = full_sobolev_residual[:,:K,:K]
-    truncated_sobolev_norm = truncated_sobolev_residual.reshape(-1, K * K).sum(axis=-1)
-    truncated_cal_norms, truncated_test_norms = truncated_sobolev_norm[:cal_size], truncated_sobolev_norm[cal_size:]
-    q_hats = np.quantile(truncated_cal_norms, 1-alphas)
+    for K_trunc in truncations_to_coverages:
+        plt.plot(1 - alphas, truncations_to_coverages[K_trunc], label=r"$\mathrm{Full}, K_{\mathrm{Trunc}}=" + str(K_trunc) + "$")
     
-    # NOTE: these coverages are the standard CP guarantee -- we only use for debugging
-    tiled_full_test_norms      = einops.repeat(full_test_norms, "n -> n repeat", repeat=len(alphas))
-    tiled_truncated_test_norms = einops.repeat(truncated_test_norms, "n -> n repeat", repeat=len(alphas))
-    debug_full_coverage        = einops.reduce((tiled_full_test_norms < q_hat_stars) / len(tiled_full_test_norms), "n repeat -> repeat", reduction="sum")
-    debug_truncated_coverage   = einops.reduce((tiled_truncated_test_norms < q_hats) / len(truncated_test_norms), "n repeat -> repeat", reduction="sum")
-    # print(f"[DEBUG] Truncated Coverage: {debug_truncated_coverage} vs {1 - alphas}  |  Full Coverage: {debug_full_coverage} vs {1 - alphas}")
-    
-    full_coverages = einops.reduce((tiled_full_test_norms < q_hats) / len(tiled_full_test_norms), "n repeat -> repeat", reduction="sum")
-    delta_qs = (q_hat_stars - q_hats) / q_hat_stars
-    
-    n = np.prod(full_sobolev_residual.shape[1:])
-    ellipsoid_vol = n / 2 * np.log(q_hat_stars[0]) - np.sum(np.log(sobolev_scaling)) / 2
-    
-    return delta_qs, ellipsoid_vol, full_coverages
+    plt.xlabel(r"$1-\alpha$")
+    plt.ylabel(r"$\mathrm{Coverage}$")
+    plt.legend()
 
-
-def calibrate(pde):
-    fs, us = utils.get_data(pde, train=False)
-    f_c = fs[args.sample].reshape((256,256))
-    u_c = us[args.sample].reshape((256,256)).detach().cpu().numpy().copy()
-
-    cutoff = 8
-    u_c_hat = model(f_c.unsqueeze(0).unsqueeze(0).to("cuda").to(torch.float32)[...,:cutoff,:cutoff]).reshape((cutoff,cutoff)).detach().cpu().numpy().copy()
-    u_c_hat2 = np.zeros(u_c.shape)
-    u_c_hat2[:cutoff,:cutoff] = u_c_hat
-
-    with open(utils.DATA_FN(pde), "rb") as f:
-        (fs, us) = pickle.load(f)
-
-    net  = SpecOp()
-    net.load_state_dict(torch.load(utils.MODEL_FN(pde), weights_only=True))
-    net.eval().to("cuda")
-
-    prop_train = 0.75
-    N = fs.shape[0]
-    N_train = int(N * prop_train)
-
-    f_cal = torch.from_numpy(fs[N_train:]).to(torch.float32).to("cuda")
-    u_cal = us[N_train:]
-
-    u_hat = net(f_cal).cpu().detach().numpy()
-    u_hat = np.transpose(u_hat.reshape((u_hat.shape[0], 256, 256)), (0, 2, 1))
-    u_cal = np.transpose(u_cal.reshape((u_hat.shape[0], 256, 256)), (0, 2, 1))
-    s = 2 # working w/ Laplacian in PDE immediately imposes s = 2 smoothness
-
-    alphas = np.arange(0.05, 1, 0.05)
-    gamma_eps = 0.1
-    gammas = np.arange(1, s + gamma_eps, gamma_eps)
-    
-    volume_df = pd.DataFrame(columns=["trial", "gamma", "volume"])
-    for gamma in gammas:
-        coverage_df = pd.DataFrame(columns=["trial", "alpha", "coverage"])
-        delta_q_df  = pd.DataFrame(columns=["trial", "K", "delta_q"])
-
-        alphas = np.arange(0.05, 1, 0.05)
-        trials = range(10)
-        for trial in trials:
-            _, volume, coverages = sobolev_cp_cov(u_hat, u_cal, K=125, s=s, gamma=gamma, alphas=alphas)
-            for alpha, coverage in zip(alphas, coverages):
-                coverage_df.loc[-1] = [trial, 1-alpha, coverage]
-                coverage_df.index = coverage_df.index + 1
-                coverage_df = coverage_df.sort_index()
-            
-            volume_df.loc[-1] = [trial, gamma, volume]
-            volume_df.index = volume_df.index + 1
-            volume_df = volume_df.sort_index()
-
-        #     Ks = np.arange(5, 100, 5)
-        #     for K in Ks:
-        #         delta_q, _, _ = sobolev_cp_cov(u_hat, u_cal, K=125, s=s, gamma=gamma, alphas=[0.05])
-        #         delta_q_df.loc[-1] = [trial, K, delta_q[0]]
-        #         delta_q_df.index = delta_q_df.index + 1
-        #         delta_q_df = delta_q_df.sort_index()
-        
-        # plt.title(r"$K$ vs $\Delta\widehat{q}$ ($\gamma = " + str(gamma) + "$)")
-        # plt.xlabel(r"$K$")
-        # plt.ylabel(r"$\widehat{q}^{*}_{\gamma} - \widehat{q}_{\gamma}$")
-        # sns.lineplot(delta_q_df, x="K", y="delta_q")
-        # plt.savefig(os.path.join(utils.PDE_DIR(pde), f"delta_q_gamma={gamma}.png"))
-        # plt.tight_layout()
-        # plt.clf()
-
-        plt.title(r"$\mathrm{Calibration}$")
-        plt.xlabel(r"$\alpha$")
-        plt.ylabel(r"$\mathrm{Coverage}$")
-        sns.lineplot(coverage_df, x="alpha", y="coverage", label=r"$\gamma=" + "{:.1f}".format(gamma) + "$")
-
-    plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-    plt.tight_layout()
-    plt.savefig(os.path.join(utils.PDE_DIR(pde), f"coverage.png"))
-    plt.clf()
-
-    plt.title(r"$\gamma \mathrm{\ vs\ Volume}$")
-    plt.xlabel(r"$\gamma$")
-    plt.ylabel(r"$\log(\mathrm{Vol})$")
-    sns.lineplot(volume_df, x="gamma", y="volume")
-
-    plt.tight_layout()
-    plt.savefig(os.path.join(utils.PDE_DIR(pde), f"volume.png"))
-    plt.clf()
+    plt.savefig("calibration.png")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--pde")
+    parser.add_argument("--cutoff", type=int, default=8)
     args = parser.parse_args()
 
-    calibrate(args.pde)
+    with open(utils.DATA_FN(args.pde), "rb") as f:
+        (fs_np, us_np) = pickle.load(f)
+
+    train_prop = 0.5
+    N_full = int(len(fs_np) * (1 - train_prop))
+    fs_full, us_full = fs_np[N_full:], us_np[N_full:]
+    weight_fn = f"/home/yppatel/fpo/data/{args.pde}/model.pt"
+
+    model = EncoderDecoderNet().to("cuda:0")
+    model.load_state_dict(torch.load(weight_fn, weights_only=True))
+    model.eval().to("cuda")
+    torch.save(model.state_dict(), utils.MODEL_FN(args.pde))
+
+    calibrate(fs_full, us_full, model)
