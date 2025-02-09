@@ -23,169 +23,317 @@ import utils
 logger = logging.getLogger(__name__)
 device = "cuda:0"
 
+##############################################################################
+# 1) The Gaussian Random Field class (as given)
+##############################################################################
 
 class GaussianRF(object):
     """
     Represents a Gaussian Random Field generator.
-
-    Args:
-        dim (int): The dimension of the random field.
-        size (int): The size of the random field.
-        alpha (float, optional): The parameter alpha. Defaults to 2.
-        tau (float, optional): The parameter tau. Defaults to 3.
-        sigma (float, optional): The standard deviation of the random field. If None, it is calculated based on tau and alpha. Defaults to None.
-        boundary (str, optional): The boundary condition of the random field. Defaults to "periodic".
-        device (str, optional): The device to use for computation. Defaults to None.
-
-    Attributes:
-        dim (int): The dimension of the random field.
-        device (str): The device used for computation.
-        sqrt_eig (torch.Tensor): The square root of the eigenvalues of the random field.
-        size (tuple): The size of the random field.
-
-    Methods:
-        sample(N): Generates N samples of the random field.
-
+    (Provided in the question; repeated here for completeness.)
     """
-
     def __init__(self, dim, size, alpha=2, tau=3, sigma=None, boundary="periodic", device=None):
-        """
-        Initializes a GaussianRF object.
-
-        Args:
-            dim (int): The dimension of the random field.
-            size (int): The size of the random field.
-            alpha (float, optional): The parameter alpha. Defaults to 2.
-            tau (float, optional): The parameter tau. Defaults to 3.
-            sigma (float, optional): The standard deviation of the random field. If None, it is calculated based on tau and alpha. Defaults to None.
-            boundary (str, optional): The boundary condition of the random field. Defaults to "periodic".
-            device (str, optional): The device to use for computation. Defaults to None.
-        """
-
         self.dim = dim
         self.device = device
 
         if sigma is None:
             sigma = tau**(0.5*(2*alpha - self.dim))
 
-        k_max = size//2
+        k_max = size // 2
 
         if dim == 1:
-            k = torch.cat((torch.arange(start=0, end=k_max, step=1, device=device), torch.arange(start=-k_max, end=0, step=1, device=device)), 0)
+            import math
+            k = torch.cat((torch.arange(start=0, end=k_max, step=1, device=device),
+                           torch.arange(start=-k_max, end=0, step=1, device=device)), 0)
 
-            self.sqrt_eig = size*math.sqrt(2.0)*sigma*((4*(math.pi**2)*(k**2) + tau**2)**(-alpha/2.0))
+            self.sqrt_eig = (size * math.sqrt(2.0) * sigma *
+                             ((4 * (math.pi**2) * (k**2) + tau**2) ** (-alpha/2.0)))
             self.sqrt_eig[0] = 0.0
 
         elif dim == 2:
-            wavenumers = torch.cat((torch.arange(start=0, end=k_max, step=1, device=device), \
-                                    torch.arange(start=-k_max, end=0, step=1, device=device)), 0).repeat(size,1)
+            import math
+            wavenumbers = torch.cat((torch.arange(start=0, end=k_max, step=1, device=device),
+                                      torch.arange(start=-k_max, end=0, step=1, device=device)), 0).repeat(size, 1)
 
-            k_x = wavenumers.transpose(0,1)
-            k_y = wavenumers
+            k_x = wavenumbers.transpose(0, 1)
+            k_y = wavenumbers
 
-            self.sqrt_eig = (size**2)*math.sqrt(2.0)*sigma*((4*(math.pi**2)*(k_x**2 + k_y**2) + tau**2)**(-alpha/2.0))
+            self.sqrt_eig = ((size**2) * math.sqrt(2.0) * sigma *
+                             ((4*(math.pi**2)*(k_x**2 + k_y**2) + tau**2) ** (-alpha/2.0)))
             self.sqrt_eig[0,0] = 0.0
 
         elif dim == 3:
-            wavenumers = torch.cat((torch.arange(start=0, end=k_max, step=1, device=device), \
-                                    torch.arange(start=-k_max, end=0, step=1, device=device)), 0).repeat(size,size,1)
+            import math
+            wavenumbers = torch.cat((torch.arange(start=0, end=k_max, step=1, device=device),
+                                      torch.arange(start=-k_max, end=0, step=1, device=device)), 0).repeat(size, size, 1)
 
-            k_x = wavenumers.transpose(1,2)
-            k_y = wavenumers
-            k_z = wavenumers.transpose(0,2)
+            k_x = wavenumbers.transpose(1, 2)
+            k_y = wavenumbers
+            k_z = wavenumbers.transpose(0, 2)
 
-            self.sqrt_eig = (size**3)*math.sqrt(2.0)*sigma*((4*(math.pi**2)*(k_x**2 + k_y**2 + k_z**2) + tau**2)**(-alpha/2.0))
+            self.sqrt_eig = ((size**3) * math.sqrt(2.0) * sigma *
+                             ((4*(math.pi**2)*(k_x**2 + k_y**2 + k_z**2) + tau**2) ** (-alpha/2.0)))
             self.sqrt_eig[0,0,0] = 0.0
 
-        self.size = []
-        for j in range(self.dim):
-            self.size.append(size)
-
+        self.size = [size]*dim
         self.size = tuple(self.size)
 
     def sample(self, N):
         """
         Generates N samples of the random field.
 
-        Args:
-            N (int): The number of samples to generate.
-
         Returns:
-            torch.Tensor: The generated samples of the random field.
+            torch.Tensor of shape (N, *self.size) with real values.
         """
-
         coeff = torch.randn(N, *self.size, dtype=torch.cfloat, device=self.device)
         coeff = self.sqrt_eig * coeff
 
+        # Inverse FFT along all spatial dimensions
         return torch.fft.ifftn(coeff, dim=list(range(-1, -self.dim - 1, -1))).real
 
-def solve_poisson_trial():
-    # Parameters
-    Lx, Ly = 2 * np.pi, 2 * np.pi
-    Nx, Ny = 256, 256
-    dtype = np.float64
 
-    # Bases
-    coords = d3.CartesianCoordinates("x", "y")
-    dist   = d3.Distributor(coords, dtype=dtype)
-    xbasis = d3.RealFourier(coords["x"], size=Nx, bounds=(0, Lx))
-    ybasis = d3.RealFourier(coords["y"], size=Ny, bounds=(0, Ly))
+##############################################################################
+# 2) The Poisson solver in Fourier space (using rfft2/irfft2)
+##############################################################################
 
-    # Fields
-    u = dist.Field(name='u', bases=(xbasis, ybasis))
-    tau_u = dist.Field(name='tau_u')
+def solve_poisson_2d_fourier(f_hat: np.ndarray, enforce_zero_mean: bool = True) -> np.ndarray:
+    """
+    Solve the Poisson equation Δu = f on the 2D torus using the Fourier method.
 
-    # Forcing
-    f = dist.Field(name='f', bases=(xbasis, ybasis))
-    
-    GRF = GaussianRF(2, Nx, alpha=4.5, tau=7, device=device)
-    a = GRF.sample(1)[0].detach().cpu().numpy()
+    Parameters
+    ----------
+    f_hat : np.ndarray, shape (N1, N2)
+        2D array of *raw* Fourier coefficients of f in unshifted (NumPy) order.
+    enforce_zero_mean : bool
+        If True, enforce that f_hat(0,0)=0 and also set u_hat(0,0)=0.
 
-    # Grid size
-    N = 256
+    Returns
+    -------
+    u_hat : np.ndarray, shape (N1, N2)
+        2D array of Fourier coefficients of the solution u.
+    """
+    N1, N2 = f_hat.shape
+    u_hat = np.zeros_like(f_hat, dtype=np.complex128)
 
-    # Create normalized coordinate arrays [0,1] x [0,1]
-    x = np.linspace(0, 1, N)
-    y = np.linspace(0, 1, N)
+    if enforce_zero_mean:
+        # Force zero frequency of f to be zero if it's not:
+        if abs(f_hat[0, 0]) > 1e-14:
+            # You might want to log or warn here
+            f_hat[0, 0] = 0.0
 
-    # Create a meshgrid (X, Y) for evaluating the function on the entire 2D domain
-    X, Y = np.meshgrid(x, y, indexing='xy')
-    
+    for k1 in range(N1):
+        # map to integer wave number k1_shifted
+        if k1 <= N1 // 2:
+            k1_shifted = k1
+        else:
+            k1_shifted = k1 - N1
+
+        for k2 in range(N2):
+            if k2 <= N2 // 2:
+                k2_shifted = k2
+            else:
+                k2_shifted = k2 - N2
+
+            if k1_shifted == 0 and k2_shifted == 0:
+                # zero mode
+                u_hat[k1, k2] = 0.0
+            else:
+                k_sq = k1_shifted**2 + k2_shifted**2
+                # -|k|^2 * u_hat(k) = f_hat(k)  =>  u_hat(k) = -f_hat(k)/|k|^2
+                u_hat[k1, k2] = - f_hat[k1, k2] / k_sq
+
+    return u_hat
+
+def solve_poisson_2d_rfft(f_hat_r: np.ndarray, enforce_zero_mean: bool = True) -> np.ndarray:
+    """
+    Solve the Poisson equation Δu = f on the 2D torus using real FFTs.
+
+    Parameters
+    ----------
+    f_hat_r : np.ndarray, shape (N1, N2//2+1)
+        2D array of half-complex Fourier coefficients of f, as produced by np.fft.rfft2.
+    enforce_zero_mean : bool
+        If True, enforce that the zero mode f_hat_r[0,0]=0.
+
+    Returns
+    -------
+    u_hat_r : np.ndarray, shape (N1, N2//2+1)
+        2D array of half-complex Fourier coefficients of the solution u.
+    """
+    N1, M = f_hat_r.shape  # here, M = N2//2 + 1
+    u_hat_r = np.zeros_like(f_hat_r, dtype=np.complex128)
+
+    if enforce_zero_mean:
+        if abs(f_hat_r[0, 0]) > 1e-14:
+            f_hat_r[0, 0] = 0.0
+
+    for k1 in range(N1):
+        # Map k1 to its shifted frequency
+        if k1 <= N1 // 2:
+            k1_shifted = k1
+        else:
+            k1_shifted = k1 - N1
+
+        for k2 in range(M):
+            # For rfft2, k2 runs from 0 to N2//2 (nonnegative only)
+            k2_shifted = k2  # already nonnegative
+
+            if k1_shifted == 0 and k2_shifted == 0:
+                u_hat_r[k1, k2] = 0.0
+            else:
+                k_sq = k1_shifted**2 + k2_shifted**2
+                u_hat_r[k1, k2] = - f_hat_r[k1, k2] / k_sq
+
+    return u_hat_r
+
+##############################################################################
+# 3) Sobolev norm computation in 2D
+##############################################################################
+
+def sobolev_norm_2d(f_hat: np.ndarray, s: float) -> float:
+    """
+    Compute the H^s(T^2) norm of a function f whose full Fourier coefficients
+    are given by f_hat in unshifted NumPy FFT order.
+
+    Note: This function expects f_hat to be a full (N1 x N2) array.
+          If you use rfft2, you need to expand the half-complex array to a full
+          complex array (or modify this function accordingly).
+    """
+    N1, N2 = f_hat.shape
+    total = 0.0
+
+    for k1 in range(N1):
+        if k1 <= N1 // 2:
+            k1_shifted = k1
+        else:
+            k1_shifted = k1 - N1
+
+        for k2 in range(N2):
+            if k2 <= N2 // 2:
+                k2_shifted = k2
+            else:
+                k2_shifted = k2 - N2
+
+            k_sq = k1_shifted**2 + k2_shifted**2
+            factor = (1.0 + k_sq)**s
+            coeff_sq = np.abs(f_hat[k1, k2])**2
+            total += factor * coeff_sq
+
+    return np.sqrt(total)
+
+def rfft2_to_fft2(rfft_result, input_shape):
+    """
+    Converts the result of numpy.fft.rfft2 to the equivalent result of numpy.fft.fft2.
+
+    Args:
+        rfft_result (numpy.ndarray): The result of numpy.fft.rfft2.
+        input_shape (tuple): The shape of the original input array to rfft2.
+
+    Returns:
+        numpy.ndarray: The equivalent result of numpy.fft.fft2.
+    """
+    rows, cols = input_shape
+    full_fft = np.zeros((rows, cols), dtype=np.complex128)
+    full_fft[:, : cols // 2 + 1] = rfft_result
+
+    # Reconstruct the negative frequencies
+    for i in range(rows):
+        for j in range(1, cols // 2 + (0 if cols % 2 == 0 else 1)):
+            full_fft[i, cols - j] = np.conjugate(rfft_result[i, j])
+
+    return full_fft
+
+##############################################################################
+# 4) Hierarchical offset in real space
+##############################################################################
+
+def add_hierarchical_offset_2d(
+    f: np.ndarray,
+    K_max: int = 6,
+    sigma: float = 0.5,
+    rng: np.random.Generator = None
+) -> np.ndarray:
+    """
+    Add a 2D 'Gaussian source offset' mu to an existing 2D function f.
+    (See original code for details.)
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    Nx, Ny = f.shape
+    x_vals = np.linspace(0, 2*np.pi, Nx, endpoint=False)
+    y_vals = np.linspace(0, 2*np.pi, Ny, endpoint=False)
+    X, Y = np.meshgrid(x_vals, y_vals, indexing='ij')
+
+    # Define possible centers (here using a circular arrangement)
     n_points = 6
-    radius   = 0.3
+    radius   = np.pi / 2
     angles   = [k * 2 * np.pi / n_points for k in range(n_points)]
-    centers  = np.array([0.5 + radius * np.array([np.cos(angle), np.sin(angle)]) for angle in angles])
+    c_list   = np.array([np.pi + radius * np.array([np.cos(angle), np.sin(angle)]) for angle in angles])
 
-    (cx,cy) = centers[np.random.randint(low=1, high=len(centers))]
-    sigma = 0.25
-    Z = np.exp(-(((X - cx)**2 + (Y - cy)**2) / (2 * sigma**2)))
-    b = Z * 0.5
+    # Randomly pick one center (for simplicity)
+    center_indices = [np.random.randint(low=0, high=len(c_list))]
     
-    f_val = a - b
+    mu = np.zeros((Nx, Ny), dtype=float)
+    for idx in center_indices:
+        c_x, c_y = c_list[idx]
+        dist_sq = (X - c_x)**2 + (Y - c_y)**2
+        mu += np.exp(- dist_sq / (2*sigma**2))
 
-    f['g'] = f_val#[-1]
+    f_aug = f + mu
+    return f_aug
 
-    # Problem
-    problem = d3.LBVP([u, tau_u], namespace=locals())
-    problem.add_equation("lap(u) + tau_u = f")
-    problem.add_equation("integ(u) = 0")
+##############################################################################
+# 5) Putting it all together: generate random f, solve for u, check the bound
+##############################################################################
+import math
 
-    # Solver
-    solver = problem.build_solver()
-    solver.solve()
+def solve_poisson(num_samples):
+    # Parameters for the Gaussian random field
+    dim = 2
+    size = 256
+    alpha = 2
+    tau = 3
+    device = "cpu"
 
-    uc = u.allgather_data('c')
-    
-    return (f['c'].flatten(), uc.flatten())
+    # Instantiate the GRF object
+    grf = GaussianRF(dim=dim, size=size, alpha=alpha, tau=tau, sigma=None,
+                     boundary="periodic", device=device)
 
+    # Generate random samples in real space: shape (num_samples, size, size)
+    f_samples = grf.sample(num_samples).cpu().numpy()
 
-def solve_poisson(N):
-    fs, us = [], []
-    for _ in range(N):
-        f, u = solve_poisson_trial()
-        fs.append(f) 
-        us.append(u)
-    return np.array(fs), np.array(us)
+    f_hats, u_hats = [], []
+
+    # Loop through samples
+    for i in range(num_samples):
+        f_real = add_hierarchical_offset_2d(f_samples[i])
+        # Enforce zero-average in real space
+        f_real = f_real - np.mean(f_real)
+
+        # Use rfft2 since f_real is real; this returns an array of shape (size, size//2+1)
+        f_hat_r = np.fft.rfft2(f_real)
+
+        # Solve Poisson in the half-complex domain
+        u_hat_r = solve_poisson_2d_rfft(f_hat_r, enforce_zero_mean=True)
+
+        # (Optional) To compute norms with your existing sobolev_norm_2d, you would need to
+        # expand the half-complex array to a full array. For now, we simply store the half-complex
+        # coefficients.
+        # One could use: f_hat_full = np.fft.irfft2(f_hat_r)  (but that gives back f_real),
+        # so instead you could define a function to "complete" the half-complex array if needed.
+        #
+        # Here, we simply store the half-complex arrays.
+        f_hats.append(f_hat_r)
+        u_hats.append(u_hat_r)
+
+        norm_u_H1  = sobolev_norm_2d(rfft2_to_fft2(u_hat_r, (256, 256)), s=1)
+        norm_f_Hm1 = sobolev_norm_2d(rfft2_to_fft2(f_hat_r, (256, 256)), s=-1)
+
+        ratio = norm_u_H1 / (norm_f_Hm1 + 1e-14)  # Avoid div by 0 if f=0
+        print(f"Sample {i}: ||u||_H1 = {norm_u_H1:.5e}, ||f||_H^-1 = {norm_f_Hm1:.5e}, ratio = {ratio:.3f}")
+
+    return np.array(f_hats), np.array(u_hats)
     
 
 # Function to solve Navier-Stokes equation in 2D
@@ -383,105 +531,6 @@ def solve_navier_stokes(N):
     return np.array(u_i_cs), np.array(u_f_cs)
 
 
-def solve_qgniw():
-    # Numerics Parameters
-    L = 10; Lx, Ly = L, L
-    log_n = 9; Nx, Ny = 2**log_n, 2**log_n
-    dtype = np.float64
-
-    dealias = 3/2
-    stop_sim_time = 25/(2*np.pi)
-    timestepper = d3.RK443
-    dtype = np.float64
-
-    #Physical Parameters
-    kap = 5e-8*((2**(10-log_n))**4)
-
-    # Bases
-    coords = d3.CartesianCoordinates('x', 'y')
-    dist = d3.Distributor(coords, dtype=dtype)
-    xbasis = d3.RealFourier(coords['x'], size=Nx, bounds=(0, Lx), dealias=dealias)
-    ybasis = d3.RealFourier(coords['y'], size=Ny, bounds=(0, Ly), dealias=dealias)
-
-    # Fields
-    zeta = dist.Field(bases=(xbasis,ybasis) )
-    psi = dist.Field(bases=(xbasis,ybasis) )
-    tau_psi = dist.Field()
-
-    # Substitutions
-    dx = lambda A: d3.Differentiate(A, coords['x'])
-    dy = lambda A: d3.Differentiate(A, coords['y'])
-    lap = lambda A: d3.Laplacian(A)
-    integ = lambda A: d3.Integrate(A, ('x', 'y'))
-
-    x, y = dist.local_grids(xbasis, ybasis)
-
-    J = lambda A, B: dx(A)*dy(B)-dy(A)*dx(B)
-    l4H = lambda A: lap(lap(A))
-
-    KE = integ(dx(psi)**2+dy(psi)**2)/2
-    Enstrophy = integ(zeta**2)/2
-
-    # Problem
-    problem = d3.IVP([zeta, psi, tau_psi], namespace=locals())
-    problem.add_equation("lap(psi) + tau_psi = zeta")
-    problem.add_equation("dt(zeta) + kap*l4H(zeta) = - J(psi,zeta)")
-    problem.add_equation("integ(psi) = 0")
-
-    # Solver
-    solver = problem.build_solver(timestepper)
-    solver.stop_sim_time = stop_sim_time
-
-    # Initial conditions
-    zeta.fill_random('c', distribution='normal', scale=6.2e-2) # Random noise
-    # Filter the IC
-    kx = xbasis.wavenumbers[dist.local_modes(xbasis)]; ky = ybasis.wavenumbers[dist.local_modes(ybasis)]; K = np.sqrt(kx**2+ky**2)
-    init_fac = K*(1+(K/(2*np.pi))**4)**(-1/2)
-    zeta['c'] *= init_fac
-
-    # Analysis
-    snapdata = solver.evaluator.add_file_handler('2DEuler_snap', sim_dt=0.1, max_writes=50)
-    snapdata.add_task(-(-zeta), name='ZETA')
-    snapdata.add_task(-(-psi), name='PSI')
-
-    diagdata = solver.evaluator.add_file_handler('2DEuler_diag', sim_dt=0.01, max_writes=stop_sim_time*100)
-    diagdata.add_task(KE, name='KE')
-    diagdata.add_task(Enstrophy, name='Enstrophy')
-
-    # Flow properties
-    dt_change_freq = 10
-    flow = d3.GlobalFlowProperty(solver, cadence=dt_change_freq)
-    flow.add_property(abs(dy(psi)), name='absu')
-    flow.add_property(abs(dx(psi)), name='absv')
-    flow.add_property(-psi*zeta/2, name='KE')
-
-    # Main loop
-    timestep = 1e-7
-    delx = Lx/Nx; dely = Ly/Ny
-
-    uic = zeta['c'].copy()
-    try:
-        logger.info('Starting main loop')
-        solver.step(timestep)
-        while solver.proceed:
-            solver.step(timestep)
-            if (solver.iteration-1) % dt_change_freq == 0:
-                maxU = max(1e-10,flow.max('absu')); maxV = max(1e-10,flow.max('absv'))
-                timestep_CFL = min(delx/maxU,dely/maxV)*0.5
-                timestep = min(max(1e-5, timestep_CFL), 1)
-            if (solver.iteration-1) % 10 == 0:
-                logger.info('Iteration=%i, Time=%.3f, dt=%.3e, KE=%.3f' %(solver.iteration, solver.sim_time, timestep, flow.volume_integral('KE')))
-
-    except:
-        logger.error('Exception raised, triggering end of main loop.')
-        raise
-    finally:
-        solver.log_stats()
-    ufc = zeta['c'].copy()
-
-    return (uic.flatten(), ufc.flatten())
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--pde")
@@ -491,7 +540,6 @@ if __name__ == "__main__":
     pde_to_func = {
         "poisson":  solve_poisson,
         "navier_stokes": solve_navier_stokes,
-        "qgniw": solve_qgniw,
     }
     fs, us = pde_to_func[args.pde](args.N)
 
