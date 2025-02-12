@@ -7,14 +7,140 @@ import dedalus.public as d3
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+import pickle
 from scipy import signal
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
+from scipy import signal
 
-from spec_op import SpecOp
+from spec_op import EncoderDecoderNet
 import utils
 
 device = "cuda:0"
+
+import math
+
+from scipy.special import j1
+
+def rfft2_to_fft2(rfft_result, input_shape):
+    """
+    Converts the result of numpy.fft.rfft2 to the equivalent result of numpy.fft.fft2.
+
+    Args:
+        rfft_result (numpy.ndarray): The result of numpy.fft.rfft2.
+        input_shape (tuple): The shape of the original input array to rfft2.
+
+    Returns:
+        numpy.ndarray: The equivalent result of numpy.fft.fft2.
+    """
+    N, rows, cols = (rfft_result.shape[0], input_shape[0], input_shape[1])
+    full_fft = np.zeros((N, rows, cols), dtype=np.complex128)
+    full_fft[:,:,:cols // 2 + 1] = rfft_result
+    full_fft[:,:,cols-1:cols // 2:-1]  = np.conjugate(rfft_result)[:,:,1:-1]
+    return full_fft
+
+def compute_I(k1_shifted, k2_shifted, center, radius):
+    """
+    Compute I(k) = ∫_{B(center; radius)} e^{i k·x} dx
+    for a 2D disk of radius 'radius' centered at 'center'=(wx,wy) in [0,2π]^2.
+
+    We assume no boundary clipping, i.e. the entire disk B(center;radius) 
+    is used as if in R^2. If you want partial intersection with [0,2π]^2, 
+    adapt this integral.
+
+    For the disk around 0, the integral is:
+        2π * r * J1(r|k|)/|k|,  or π r^2 if |k|=0.
+    We multiply by e^{ i k·center } to shift the center from 0 to 'center'.
+
+    Args:
+        k1_shifted, k2_shifted : the integer wave numbers (possibly negative),
+                                 e.g. unshifted indexing on [0..255].
+        center : (wx, wy) in [0,2π]^2 (real space).
+        radius : float, the disk radius in real-space units.
+    
+    Returns:
+        A single complex number for the integral I(k).
+    """
+    wx, wy = center
+    kx = float(k1_shifted)
+    ky = float(k2_shifted)
+    k_mag = math.sqrt(kx**2 + ky**2)
+
+    if k_mag < 1e-14:
+        # k=0 => integral is area of disk => π * r^2
+        return -np.pi * (radius**2)
+    else:
+        # Phase from e^{i k·center}
+        phase = np.exp(1j*(kx*wx + ky*wy))
+        # radial factor from integral over disk => 2π r J1(r|k|)/|k|
+        val = 2.0 * np.pi * radius * j1(radius*k_mag) / k_mag
+        return -val * phase
+
+def maximize_u_hat(u_hat, q, s=1.0, center=(0.0, 0.0), radius=1.0):
+    """
+    Given:
+      - u_hat: np.ndarray of shape (256,256), the original Fourier array of u.
+      - q: float, the "budget" radius.
+      - s: float, the Sobolev exponent in (1 + |k|^2)^s.
+      - center, radius: define the real-space disk B(center, radius) in [0,2π]^2 
+        used for computing I(k).
+
+    Build the maximizer:
+      u_hat^*(k) = u_hat(k) + (q / ||phi||_{H^s}) * [ I(k) / (1+|k|^2)^s ],
+    where
+      ||phi||_{H^s}^2 = ∑_k |I(k)|^2 / (1+|k|^2)^{s}.
+
+    Returns:
+      u_hat_star: np.ndarray of shape (256,256), the updated Fourier array.
+    """
+    rows, cols = u_hat.shape
+    assert rows==256 and cols==256, "Expected a 256x256 Fourier array."
+
+    # 1) Compute phi_norm^2
+    phi_norm_sq = 0.0
+    for k1 in range(rows):
+        if k1 <= rows//2:
+            k1_shifted = k1
+        else:
+            k1_shifted = k1 - rows
+
+        for k2 in range(cols):
+            if k2 <= cols//2:
+                k2_shifted = k2
+            else:
+                k2_shifted = k2 - cols
+
+            Ik = compute_I(k1_shifted, k2_shifted, center, radius)
+            k_sq = k1_shifted**2 + k2_shifted**2
+            denom = (1.0 + k_sq)**s
+            phi_norm_sq += (abs(Ik)**2) / (denom**2)
+
+    phi_norm = math.sqrt(phi_norm_sq)
+
+    # 2) Construct u_hat^*
+    u_hat_star = np.copy(u_hat)
+    for k1 in range(rows):
+        if k1 <= rows//2:
+            k1_shifted = k1
+        else:
+            k1_shifted = k1 - rows
+
+        for k2 in range(cols):
+            if k2 <= cols//2:
+                k2_shifted = k2
+            else:
+                k2_shifted = k2 - cols
+
+            Ik = compute_I(k1_shifted, k2_shifted, center, radius)
+            k_sq = k1_shifted**2 + k2_shifted**2
+            denom = (1.0 + k_sq)**s
+
+            # The increment
+            incr = (q / phi_norm) * (Ik / denom)
+            u_hat_star[k1, k2] += incr
+
+    return u_hat_star
+
 
 def cartesian_product(*arrays):
     la = len(arrays)
@@ -25,52 +151,12 @@ def cartesian_product(*arrays):
     return arr.reshape(-1, la)
 
 
-def get_reference_field(Nx, Ny, Lx, Ly):
-    dtype = np.float64
-
-    # Bases
-    coords = d3.CartesianCoordinates("x", "y")
-    dist   = d3.Distributor(coords, dtype=dtype)
-    xbasis = d3.RealFourier(coords["x"], size=Nx, bounds=(0, Lx))
-    ybasis = d3.RealFourier(coords["y"], size=Ny, bounds=(0, Ly))
-
-    # Fields
-    return dist.Field(name='u', bases=(xbasis, ybasis))
-
-
-def get_single_basis(k, coord):
-    # using RealFourier basis, which has elements [cos(0*x), -sin(0*x), cos(1*x), -sin(1*x),...]
-    if k % 2 == 0:
-        return np.cos((k // 2) * coord)
-    return -np.sin((k // 2) * coord)
-
-
-def get_basis_fields(Lx, Ly, Nx, Ny):
-    x = np.arange(0, Lx, Lx / Nx)
-    y = np.arange(0, Ly, Ly / Ny)
-    basis_fields = np.zeros((Nx, Ny, Nx, Ny)) # dimensions are k1, k2 -> x, y grid
-    for k1 in range(Nx):
-        for k2 in range(Ny):
-            basis_x = get_single_basis(k1, x)
-            basis_y = get_single_basis(k2, y)
-            basis_fields[k1,k2] = np.expand_dims(basis_x, axis=-1) @ np.expand_dims(basis_y, axis=-1).T
-    return basis_fields
-
-
 def get_collection_window(radius):
     # NOTE: radius is specified in *index* space, i.e. not in the actual discretized space units
     diam = 2 * radius + 1
     coords = cartesian_product(np.array(range(diam)), np.array(range(diam))).reshape((diam, diam, 2))
     offsets = coords - np.array([radius, radius])
     return offsets
-
-
-def get_collection_masks(radius):
-    offsets = get_collection_window(radius)
-    lens = np.linalg.norm(offsets, axis=-1)
-
-    collection_well = (lens <= radius).astype(float)
-    return collection_well
 
 
 def get_collection_border_normals(radius):
@@ -84,14 +170,16 @@ def get_collection_border_normals(radius):
     return well_border, well_normals
 
 
-def solve_nominal(field_coeff, radius, Lx, Ly):
+def get_collection_masks(radius):
+    offsets = get_collection_window(radius)
+    lens = np.linalg.norm(offsets, axis=-1)
+
+    collection_well = (lens <= radius).astype(float)
+    return collection_well
+
+
+def solve_nominal(field_g, radius):
     collection_well = get_collection_masks(radius)
-
-    Nx, Ny = field_coeff.shape
-    field = get_reference_field(Nx, Ny, Lx, Ly)
-    field["c"] = field_coeff
-    field_g = field["g"].copy()
-
     conv_offset = np.array(collection_well.shape) // 2
     collection = signal.convolve2d(field_g, collection_well, mode='valid')
     unadj_w_star = np.unravel_index(np.argmax(collection, axis=None), collection.shape)
@@ -99,129 +187,117 @@ def solve_nominal(field_coeff, radius, Lx, Ly):
     return w_star
 
 
-def viz_results(field, w_star, w_nom, w_rob):
-    # Create a figure and axes
-    fig, ax = plt.subplots()
+def solve_robust(w_nom_star, r_pix, uhat_spectrum, conformal_radius):
+    to_real_space = lambda w : -2 * np.pi * (w / 256)
+    w = w_nom_star
 
-    ax.imshow(field)
+    eta = 1.0
+    T = 100
+    ws = [w.copy()]
+    w_prev = w.copy()
 
-    circle = Circle(w_star[::-1], 1, color='g')
-    ax.add_patch(circle)
-    ax.set_aspect('equal')
+    for _ in range(T):
+        u_star_hat = maximize_u_hat(uhat_spectrum, q=conformal_radius, s=1.0, center=to_real_space(w), radius=r)
+        u_star_real = np.fft.ifft2(u_star_hat).real
 
-    circle = Circle(w_nom[::-1], 1, color='r')
-    ax.add_patch(circle)
-    ax.set_aspect('equal')
-
-    circle = Circle(w_rob[::-1], 1, color='b')
-    ax.add_patch(circle)
-    ax.set_aspect('equal')
-    plt.imsave("result.png")
-
-
-def solve_robust(field_coeff, radius, Lx, Ly, cutoff):
-    # --------- Problem setup --------- #
-    Nx, Ny = field_coeff.shape
-    basis_fields = get_basis_fields(Lx, Ly, Nx, Ny)
-    field = get_reference_field(Nx, Ny, Lx, Ly)
-
-    k1 = np.array(range(Nx))
-    k2 = np.array(range(Ny))
-    modes = cartesian_product(k1, k2).reshape((Nx, Ny, 2))
-
-    collection_well = get_collection_masks(radius)
-    well_border, well_normals = get_collection_border_normals(radius)
-
-    # ------- Optimization loop ------- #
-    eta = 0.5
-    T   = 100
-    
-    d = 2     # ambient dimension space (i.e. space over which the vector field u is defined)
-    s = 2     # smoothness of PDE (s-Sobolev space)
-    gamma = 1 # gamma defines CP norm; must be between [1,...,s-1] from theory
-
-    lambda_ = 20.0
-    k_norms = np.linalg.norm(modes, axis=-1, ord=1)
-    norm_factor = 1 / (2 * lambda_ * (1 + (k_norms) ** (2 * d)) ** (s - gamma))
-
-    w = solve_nominal(field_coeff, radius, Lx, Ly) # initialize with nominal solution
-    ws = [w]
-    field_g_robs = []
-    basis_fields_cut = basis_fields[:cutoff,:cutoff]
-
-    for t in range(T):
-        window_size = np.array(collection_well.shape) // 2
-        windows = basis_fields_cut[...,w[0] - window_size[0]:w[0] + window_size[0] + 1,w[1] - window_size[1]:w[1] + window_size[1] + 1]
-        scaled_windows = windows * np.expand_dims(np.expand_dims(collection_well, axis=0), axis=0)
-        Phi_w = einops.reduce(scaled_windows, "k1 k2 x y -> k1 k2", "sum")
-
-        field_c_delta = Phi_w * norm_factor[:cutoff,:cutoff]
-        field_coeff_adv = field_coeff.copy()
-        field_coeff_adv[:cutoff,:cutoff] -= field_c_delta
-        
-        field["c"] = field_coeff_adv
-        field_g_rob = field["g"].copy()
-        field_g_robs.append(field_g_rob)
-
-        # take gradient step with the computed robust field
-        well_window = field_g_rob[w[0] - window_size[0]:w[0] + window_size[0] + 1,w[1] - window_size[1]:w[1] + window_size[1] + 1]
+        well_border, well_normals = get_collection_border_normals(r_pix)
+        window_size = np.array(well_border.shape) // 2
+        well_window = u_star_real[w[0] - window_size[0]:w[0] + window_size[0] + 1,w[1] - window_size[1]:w[1] + window_size[1] + 1]
         grad = np.array([
             np.sum(well_window * well_normals[...,0] * well_border),
             np.sum(well_window * well_normals[...,1] * well_border),
         ])
-
+        
+        w_prev = w
         w = np.round(w + eta * grad).astype(int)
-        w = np.mod(w, np.array(field_g_rob.shape))
-        ws.append(w)
-    return w
+        ws.append(w.copy())
+
+        if np.allclose(w, w_prev): # form of early stopping
+            break
+    return w.copy()
 
 
-def eval(field_coeff, radius, w, Lx, Ly):
-    Nx, Ny = field_coeff.shape
-    field = get_reference_field(Nx, Ny, Lx, Ly)
-    field["c"] = field_coeff
-    field_g = field["g"].copy()
+
+def eval(field_g, radius, w):
     collection_well = get_collection_masks(radius)
-
     window_size = np.array(collection_well.shape) // 2
     window = field_g[w[0] - window_size[0]:w[0] + window_size[0] + 1,w[1] - window_size[1]:w[1] + window_size[1] + 1]
     return np.sum(window * collection_well)
 
 
-def fpo_trial(u_c, u_c_hat, radius, cutoff):
-    Lx, Ly = 2 * np.pi, 2 * np.pi
+def fpo_trial(u_real, uhat_real, uhat_spectrum, radius, conformal_radius): 
+    r_pix = int(256 * (radius / (2 * np.pi)))
     w_stars = {
-        "Truth": solve_nominal(u_c, radius, Lx, Ly),
-        "Nominal": solve_nominal(u_c_hat, radius, Lx, Ly),
-        "Robust": solve_robust(u_c_hat, radius, Lx, Ly, cutoff),
+        "Truth": solve_nominal(u_real, r_pix),
+        "Nominal": solve_nominal(uhat_real, r_pix),
     }
-    Js = {experiment : [eval(u_c, radius, w_stars[experiment], Lx, Ly)] for experiment in w_stars}
-    return Js
+
+    # HACK: some solutions go out of bounds -- we could handle this pretty easily by just wrapping according to periodic BC
+    # but just ignoring these cases for now
+    try:
+        w_stars["Robust"] = solve_robust(w_stars["Nominal"], r_pix, uhat_spectrum, conformal_radius)
+        Js = {experiment : [eval(u_real, r_pix, w_stars[experiment])] for experiment in w_stars}
+        return Js
+    except:
+        return None
+
+
+def get_fields(fs_full, us_full, model):
+    # 1) Convert to (N_full,2,256,129) float
+    fs_full_real = np.stack([fs_full.real, fs_full.imag], axis=1).astype(np.float32)
+    us_full_real = np.stack([us_full.real, us_full.imag], axis=1).astype(np.float32)
+
+    fs_full_torch = torch.from_numpy(fs_full_real).to(device)  # shape (N_full,2,256,129)
+    us_full_torch = torch.from_numpy(us_full_real).to(device)  # shape (N_full,2,256,129)
+
+    # 2) Evaluate model
+    model.eval()
+    with torch.no_grad():
+        uhat_full_torch = model(fs_full_torch)  # shape (N_full,2,256,129)
+
+    # 3) Convert predictions and ground truth to full Nx x Ny => shape (N_full,256,256)
+    uhat_full_np = uhat_full_torch.cpu().numpy()  # shape (N_full,2,256,129)
+    us_full_np   = us_full_torch.cpu().numpy()    # shape (N_full,2,256,129)
+
+    # We'll build the half-complex array back to shape (N_full,256,129) complex
+    uhat_half_complex = uhat_full_np[:,0] + 1j*uhat_full_np[:,1]  # shape (N_full,256,129)
+    us_half_complex   = us_full_np[:,0]   + 1j*us_full_np[:,1]    # shape (N_full,256,129)
+    
+    us_real     = np.fft.irfft2(us_half_complex).real
+    uhats_real  = np.fft.irfft2(uhat_half_complex).real
+    uhats_spectrum = rfft2_to_fft2(us_half_complex, (256, 256))
+
+    return us_real, uhats_real, uhats_spectrum
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--pde")
     parser.add_argument("--sample", type=int)
-    parser.add_argument("--cutoff", type=int, default=8)
     args = parser.parse_args()
 
-    fs, us = utils.get_data(args.pde, train=False)
-    if   args.pde == "poisson":        model = SpecOp(cutoff=args.cutoff).to(device)
-    elif args.pde == "navier_stokes":  model = SpecOp(cutoff=args.cutoff).to(device)
+    with open(utils.DATA_FN(args.pde), "rb") as f:
+        (fs_np, us_np) = pickle.load(f)
 
-    model.load_state_dict(torch.load(utils.MODEL_FN(args.pde), weights_only=True))
+    train_prop = 0.5
+    N_full = int(len(fs_np) * (1 - train_prop))
+    fs_full, us_full = fs_np[N_full:], us_np[N_full:]
+
+    weight_fn = f"/home/yppatel/fpo/data/{args.pde}/model.pt"
+    model = EncoderDecoderNet().to("cuda:0")
+    model.load_state_dict(torch.load(weight_fn, weights_only=True))
     model.eval().to("cuda")
+    torch.save(model.state_dict(), utils.MODEL_FN(args.pde))
 
-    f_c = fs[args.sample].reshape((256,256))
-    u_c = us[args.sample].reshape((256,256)).detach().cpu().numpy().copy()
-
-    u_c_hat = model(f_c.unsqueeze(0).unsqueeze(0).to("cuda").to(torch.float32)[...,:args.cutoff,:args.cutoff]).reshape((args.cutoff,args.cutoff)).detach().cpu().numpy().copy()
-    u_c_hat2 = np.zeros(u_c.shape)
-    u_c_hat2[:args.cutoff,:args.cutoff] = u_c_hat
+    us_real, uhats_real, uhats_spectrum = get_fields(fs_full, us_full, model)
+    r = 0.5
+    q = 6_500
 
     os.makedirs(utils.RESULTS_DIR(args.pde), exist_ok=True)
-    results_fn = os.path.join(utils.RESULTS_DIR(args.pde), f"{args.sample}.csv")
-    results = fpo_trial(u_c, u_c_hat2, radius=10, cutoff=args.cutoff)
-    results_df = pd.DataFrame.from_dict(results)
-    results_df.to_csv(results_fn)
+
+    for sample_idx in range(len(us_real)):
+        results_fn = os.path.join(utils.RESULTS_DIR(args.pde), f"{sample_idx}.csv")
+        results = fpo_trial(us_real[sample_idx], uhats_real[sample_idx], uhats_spectrum[sample_idx], radius=r, conformal_radius=q)
+        if results is not None:
+            results_df = pd.DataFrame.from_dict(results)
+            results_df.to_csv(results_fn)
