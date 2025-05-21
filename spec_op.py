@@ -88,7 +88,7 @@ def construct_model(data_loader):
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     criterion = nn.MSELoss()
 
-    num_epochs = 200
+    num_epochs = 400
 
     for epoch in range(num_epochs):
         model.train()

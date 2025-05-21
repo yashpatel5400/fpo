@@ -17,7 +17,7 @@ import seaborn as sns
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from complex_spec_op import construct_dataset, EncoderDecoderNet
+from spec_op import construct_dataset, EncoderDecoderNet
 
 sns.set_theme()
 
@@ -162,7 +162,7 @@ def calibrate(fs_full, us_full, model):
     N_test = int(test_prop * len(fs_full))
 
     truncations_to_coverages = {}
-    for K_trunc in range(4, 17, 4):
+    for K_trunc in [256]:
         scores_full, scores_trunc, margins = compute_scores(model, fs_full, us_full, K_trunc=K_trunc)
 
         scores_cal, scores_test_trunc = scores_trunc[:N_test], scores_trunc[N_test:]
@@ -171,10 +171,13 @@ def calibrate(fs_full, us_full, model):
 
         alphas = np.arange(0.05, 0.951, 0.025)  # 0.05, 0.075, ... , 0.95
         coverages_trunc, coverages_full = [], []
+        qvals = []
         for alpha in alphas:
             qval = np.quantile(scores_cal, 1 - alpha)  # 1 - alpha
+            qvals.append(qval)
             coverages_trunc.append((scores_test_trunc < qval).sum() / len(scores_test_trunc))
             coverages_full.append((scores_test_full < qval + margins_test).sum() / len(scores_test_full))
+        print(qvals)
         truncations_to_coverages[K_trunc] = coverages_full
     
     plt.plot(alphas, alphas)

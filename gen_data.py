@@ -278,7 +278,7 @@ def add_hierarchical_offset_2d(
     for idx in center_indices:
         c_x, c_y = c_list[idx]
         dist_sq = (X - c_x)**2 + (Y - c_y)**2
-        mu += np.exp(- dist_sq / (2*sigma**2))
+        mu += np.exp(- dist_sq / (2*sigma**2)) * 0.5
 
     f_aug = f + mu
     return f_aug
@@ -401,6 +401,7 @@ def navier_stokes_2d(w0, f, visc, T, delta_t=1e-4, record_steps=1):
     #Physical time
     t = 0.0
     for j in range(steps):
+        print(f"{j} / {steps}")
         
         #Stream function in Fourier space: solve Poisson equation
         psi_h = w_h / lap
@@ -433,102 +434,59 @@ def navier_stokes_2d(w0, f, visc, T, delta_t=1e-4, record_steps=1):
         #Update real time (used only for recording)
         t += delta_t
 
-        if (j+1) % record_time == 0:
-            #Solution in physical space
-            w = torch.fft.irfft2(w_h, s=(N, N))
-            sol[...,c] = w
-            c += 1
+        # if (j+1) % record_time == 0:
+        #     #Solution in physical space
+        #     # w = torch.fft.irfft2(w_h, s=(N, N))
+        #     print(w_h.shape)
+        #     sol[...,c] = w_h
+        #     c += 1
 
-    return sol
+    return w_h
 
 
 def solve_navier_stokes(N):
-    #Resolution
-    s = 256
-
-    #Set up 2d GRF with covariance parameters
-    GRF = GaussianRF(2, s, alpha=2.5, tau=7, device=device)
-
-    # Time grid
-    t = torch.linspace(0, 1, s+1, device=device)
-    t = t[0:-1]
-
-    GRF = GaussianRF(2, s, alpha=4.5, tau=7, device=device)
-    a = GRF.sample(1)[0].detach().cpu().numpy()
-
-    # Grid size
-    N = 256
-
-    # Create normalized coordinate arrays [0,1] x [0,1]
-    x = np.linspace(0, 1, N)
-    y = np.linspace(0, 1, N)
-
-    # Create a meshgrid (X, Y) for evaluating the function on the entire 2D domain
-    X, Y = np.meshgrid(x, y, indexing='xy')
-    
-    n_points = 6
-    radius   = 0.3
-    angles   = [k * 2 * np.pi / n_points for k in range(n_points)]
-    centers  = np.array([0.5 + radius * np.array([np.cos(angle), np.sin(angle)]) for angle in angles])
-
-    (cx,cy) = centers[np.random.randint(low=1, high=len(centers))]
-
-    # Standard deviation (spread) for the Gaussian peaks
-    sigma = 0.25
-
-    Z = np.exp(-(((X - cx)**2 + (Y - cy)**2) / (2 * sigma**2)))
-    # b = Z * .25
-    
-    f = torch.from_numpy(Z).to(device) * 0.1
-
-    #Number of snapshots from solution
-    record_steps = 200
-
-    #Inputs
-    a = torch.zeros(N, s, s)
-    #Solutions
-    u = torch.zeros(N, s, s, record_steps)
+    # Parameters for the Gaussian random field
+    dim = 2
+    size = 256
+    alpha = 2
+    tau = 3
+    device = "cpu"
 
     #Solve equations in batches (order of magnitude speed-up)
-    bsize = 50
+    bsize = 100
 
-    c = 0
-    t0 = default_timer()
-    for j in range(N // bsize):
-        print(f"Batch: {j}")
+    # Instantiate the GRF object
+    grf = GaussianRF(dim=dim, size=size, alpha=alpha, tau=tau, sigma=None,
+                     boundary="periodic", device=device)
+    w0 = grf.sample(1).squeeze().cpu().detach().numpy()
 
-        #Sample random feilds
-        w0 = GRF.sample(bsize)
+    f_hats, w_hats = [], []
 
-        #Solve NS
-        sol = navier_stokes_2d(w0, f, 1e-5, 2.5, 1e-4, record_steps)
+    for _ in range(N // bsize):
+        f_hat_rs, fs, w0s = [], [], []
+        for _ in range(bsize):
+            f_sample = grf.sample(1).squeeze().cpu().detach().numpy()
+            f_real = add_hierarchical_offset_2d(f_sample)
+            
+            # Enforce zero-average in real space
+            f_real = f_real - np.mean(f_real)
+            
+            f_hat_r = np.fft.rfft2(f_real)
+            f = torch.from_numpy(f_real).to(device) * 0.25
 
-        a[c:(c+bsize),...] = w0
-        u[c:(c+bsize),...] = sol
+            f_hat_rs.append(f_hat_r)
+            fs.append(f)
+            w0s.append(w0.copy())
+        f_hat_rs = np.array(f_hat_rs)
+        fs       = torch.from_numpy(np.array(fs))
+        w0s      = torch.from_numpy(np.array(w0s))
 
-        c += bsize
-        t1 = default_timer()
-        print(j, c, t1-t0)
-    X, Y = u[...,0], u[...,-1]
-    
-    # used convert to Dedalus coefficient representation for final dataset
-    Lx, Ly = 2 * np.pi, 2 * np.pi
-    dtype = np.float64
-    coords = d3.CartesianCoordinates("x", "y")
-    dist   = d3.Distributor(coords, dtype=dtype)
-        
-    xbasis = d3.RealFourier(coords["x"], size=s, bounds=(0, Lx))
-    ybasis = d3.RealFourier(coords["y"], size=s, bounds=(0, Ly))
-    field = dist.Field(name='u', bases=(xbasis, ybasis))
+        record_steps = 200 
+        w_hat_rs = navier_stokes_2d(w0s, fs, 1e-5, 5.0, 1e-4, record_steps)
 
-    u_i_cs, u_f_cs = [], []    
-    for u_i, u_f in zip(X, Y):
-        field["g"] = u_i.detach().cpu().numpy()
-        u_i_cs.append(field["c"].copy())
-
-        field["g"] = u_f.detach().cpu().numpy()
-        u_f_cs.append(field["c"].copy())
-    return np.array(u_i_cs), np.array(u_f_cs)
+        f_hats.append(f_hat_rs)
+        w_hats.append(w_hat_rs)
+    return np.concatenate(f_hats, axis=0), np.concatenate(w_hats, axis=0), w0
 
 
 if __name__ == "__main__":
@@ -537,12 +495,13 @@ if __name__ == "__main__":
     parser.add_argument("--N", type=int)
     args = parser.parse_args()
 
-    pde_to_func = {
-        "poisson":  solve_poisson,
-        "navier_stokes": solve_navier_stokes,
-    }
-    fs, us = pde_to_func[args.pde](args.N)
-
     os.makedirs(utils.PDE_DIR(args.pde), exist_ok=True)
-    with open(utils.DATA_FN(args.pde), "wb") as f:
-        pickle.dump((fs, us), f)
+    if args.pde == "poisson":
+        fs, us = solve_poisson(args.N)
+        with open(utils.DATA_FN(args.pde), "wb") as f:
+            pickle.dump((fs, us), f)
+
+    elif args.pde == "navier_stokes":
+        fs, us, w0 = solve_navier_stokes(args.N)
+        with open(utils.DATA_FN(args.pde), "wb") as f:
+            pickle.dump((fs, us, w0), f)

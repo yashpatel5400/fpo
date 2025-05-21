@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 import seaborn as sns
 
+from fpo import solve_robust
 from spec_op import SpecOp
 import utils
 
@@ -20,17 +21,17 @@ device = "cuda:0"
 plt.rcParams['mathtext.fontset'] = 'stix'
 plt.rcParams['font.family'] = 'STIXGeneral'
 
-SMALL_SIZE = 12
-MEDIUM_SIZE = 14
-BIGGER_SIZE = 18
+# SMALL_SIZE = 12
+# MEDIUM_SIZE = 14
+# BIGGER_SIZE = 18
 
-plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
-plt.rc('axes', titlesize=BIGGER_SIZE)     # fontsize of the axes title
-plt.rc('axes', labelsize=BIGGER_SIZE)    # fontsize of the x and y labels
-plt.rc('xtick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
-plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
-plt.rc('legend', fontsize=BIGGER_SIZE)    # legend fontsize
-plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+# plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
+# plt.rc('axes', titlesize=BIGGER_SIZE)     # fontsize of the axes title
+# plt.rc('axes', labelsize=BIGGER_SIZE)    # fontsize of the x and y labels
+# plt.rc('xtick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
+# plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
+# plt.rc('legend', fontsize=BIGGER_SIZE)    # legend fontsize
+# plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
 def cartesian_product(*arrays):
     la = len(arrays)
@@ -73,7 +74,7 @@ def calibration(us, u_hats, cutoff, viz, pde):
     for alpha in alphas:
         q_hat = np.quantile(sobolev_scores_trunc[:N_cal], 1-alpha)
         q_hats.append(q_hat)
-        coverages_full.append(np.sum(sobolev_scores_full[N_cal:] < q_hat + margin) / len(sobolev_scores_full[N_cal:]))
+        coverages_full.append(np.sum(sobolev_scores_full[N_cal:] < q_hat * 2.5) / len(sobolev_scores_full[N_cal:]))
         coverages_trunc.append(np.sum(sobolev_scores_trunc[N_cal:] < q_hat) / len(sobolev_scores_trunc[N_cal:]))
 
     if viz:
@@ -87,6 +88,7 @@ def calibration(us, u_hats, cutoff, viz, pde):
         plt.legend()
 
         result_fn = os.path.join(utils.RESULTS_DIR(pde), "calibration.png")
+        plt.tight_layout()
         plt.savefig(result_fn)
 
 
@@ -171,7 +173,7 @@ def compute_robust_field(u_hat, Lx, Ly, Nx, Ny, radius, cutoff):
     Phi_ws = einops.reduce(scaled_patches, "n k1 k2 x y -> n k1 k2", "sum")
     
     # --- Perform optimization --- #
-    lambda_ = 10
+    lambda_ = 40
     d = 2       # ambient dimension space (i.e. space over which the vector field u is defined)
     s = 2       # smoothness of PDE (s-Sobolev space)
     gamma = 1.0 # gamma defines CP norm; must be between [1,...,s-1] from theory
@@ -193,7 +195,7 @@ def compute_robust_field(u_hat, Lx, Ly, Nx, Ny, radius, cutoff):
     return rob_vals.reshape((len(w0), len(w1)))
 
 
-def viz_fields(pde, u_c, u_c_hat, u_rob):
+def viz_fields(pde, u_c, u_c_hat, u_rob, w_traj, sample_idx):
     u = get_reference_field()
     u["c"] = u_c
     u_g = u["g"].copy()
@@ -211,7 +213,13 @@ def viz_fields(pde, u_c, u_c_hat, u_rob):
     axs[2].imshow(u_rob)
     axs[2].set_title(r"$u_{\mathrm{rob}} \mathrm{\ Field}$")
     
-    result_fn = os.path.join(utils.RESULTS_DIR(pde), "fields.png")
+    cmap = plt.get_cmap('viridis')
+    for i in range(len(w_traj)):
+        circle = Circle(w_traj[i][::-1], 3, color=cmap(i/(len(w_traj)-1)))
+        axs[2].add_patch(circle)
+        axs[2].set_aspect('equal')
+
+    result_fn = os.path.join(utils.RESULTS_DIR(pde), f"fields_{sample_idx}.png")
     plt.savefig(result_fn)
 
 if __name__ == "__main__":
@@ -239,9 +247,10 @@ if __name__ == "__main__":
     calibration(us, u_hats_full, args.cutoff, viz=True, pde=args.pde)
 
     # --- Define robust optimization task --- #
-    radius = 10 # NOTE: this is in *index* space, i.e. not in the actual discretized space units
-    Lx, Ly = 2 * np.pi, 2 * np.pi
-    Nx, Ny = 256, 256
+    # radius = 10 # NOTE: this is in *index* space, i.e. not in the actual discretized space units
+    # Lx, Ly = 2 * np.pi, 2 * np.pi
+    # Nx, Ny = 256, 256
     
-    robust_field = compute_robust_field(u_hats_full[args.sample,0], Lx, Ly, Nx, Ny, radius, cutoff=args.cutoff)
-    viz_fields(args.pde, us[args.sample,0], u_hats_full[args.sample,0], robust_field)
+    # robust_field = compute_robust_field(u_hats_full[args.sample,0], Lx, Ly, Nx, Ny, radius, cutoff=args.cutoff)
+    # w_traj = solve_robust(u_hats_full[args.sample,0], radius, Lx, Ly, args.cutoff)
+    # viz_fields(args.pde, us[args.sample,0], u_hats_full[args.sample,0], robust_field, w_traj, args.sample)

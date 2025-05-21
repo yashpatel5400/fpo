@@ -25,6 +25,7 @@ def main(results_dir):
         print(f'{method} -- {np.mean(normalized[method])} ({np.std(normalized[method])})')
 
     # Perform the t-test
+    # print(sorted(normalized["Robust"] - normalized["Nominal"]))
     _, p_value = ttest_rel(normalized["Robust"], normalized["Nominal"], alternative='less')
     print(f"p-value: {p_value}")
     print(np.sum(normalized["Robust"] < normalized["Nominal"]))
@@ -33,4 +34,4 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--pde")
     args = parser.parse_args()
-    main(utils.RESULTS_DIR(args.pde))
+    main("/home/yppatel/fpo/results/poisson")
