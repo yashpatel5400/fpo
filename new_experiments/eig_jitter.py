@@ -271,7 +271,7 @@ def run_single_experiment_config(config_tuple_with_id):
     return result_summary
 
 if __name__ == '__main__':
-    NUM_DISTINCT_STATES_M_SWEEP = [3, 5] 
+    NUM_DISTINCT_STATES_M_SWEEP = [3] 
     
     fixed_bias_offset_values = [0.10] 
     estimation_noise_std_values = [0.01, 0.05, 0.10] 
