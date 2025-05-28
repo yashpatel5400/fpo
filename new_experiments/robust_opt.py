@@ -3,19 +3,17 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from scipy.optimize import minimize
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt # Kept for potential single-run debug plots, but off by default
 import os
 from scipy import stats # For t-test
-from itertools import product 
-import multiprocessing # Added for parallel execution
-import json # For saving individual experiment results
-import argparse # Added for command-line arguments
+import argparse 
+import json 
 
 # --- Assume constants are available if run externally ---
 try:
     from constants import GLOBAL_HBAR, GLOBAL_M
 except ImportError:
-    GLOBAL_HBAR = 1.0; GLOBAL_M = 1.0 # Dummy values
+    GLOBAL_HBAR = 1.0; GLOBAL_M = 1.0 
 
 # --- SNN Model Definition ---
 class SimpleSpectralOperatorCNN(nn.Module):
@@ -36,13 +34,13 @@ def spectrum_complex_to_channels_torch(spectrum_mat_complex):
     if not isinstance(spectrum_mat_complex, torch.Tensor):
         spectrum_mat_complex = torch.from_numpy(spectrum_mat_complex)
     if not torch.is_complex(spectrum_mat_complex): 
-        if spectrum_mat_complex.ndim == 3 and spectrum_mat_complex.shape[0] == 2:
+        if spectrum_mat_complex.ndim == 3 and spectrum_mat_complex.shape[0] == 2: 
             return spectrum_mat_complex.float() 
         raise ValueError(f"Input spectrum_mat_complex has shape {spectrum_mat_complex.shape} and is real. Expected complex [K,K] or real [2,K,K].")
     return torch.stack([spectrum_mat_complex.real, spectrum_mat_complex.imag], dim=0).float()
 
 def channels_to_spectrum_complex_torch(channels_mat_real_imag):
-    if channels_mat_real_imag.ndim != 3 or channels_mat_real_imag.shape[0] != 2:
+    if channels_mat_real_imag.ndim != 3 or channels_mat_real_imag.shape[0] != 2: 
         raise ValueError(f"Input must have 2 channels as the first dimension, got shape {channels_mat_real_imag.shape}")
     return torch.complex(channels_mat_real_imag[0], channels_mat_real_imag[1])
 
@@ -62,8 +60,7 @@ def random_low_order_state(N, K_max_band=16):
 def get_truncated_spectrum(psi_real_space, K_trunc):
     N_grid_psi = psi_real_space.shape[0]
     F_psi_shifted = np.fft.fftshift(np.fft.fft2(psi_real_space))
-    if K_trunc > N_grid_psi: K_trunc = N_grid_psi 
-    if K_trunc == 0: return np.array([])
+    if K_trunc > N_grid_psi or K_trunc <= 0: raise ValueError(f"K_trunc {K_trunc} invalid for N_grid_psi {N_grid_psi}.")
     start_idx = N_grid_psi // 2 - K_trunc // 2
     end_idx = start_idx + K_trunc
     truncated_block = F_psi_shifted[start_idx:end_idx, start_idx:end_idx]
@@ -115,11 +112,9 @@ def generate_initial_GUS_states_via_phase_ramp(M_states, N_grid, L_domain, k_gam
         gamma_k_real = gamma_0_real * np.exp(1j * phase_factor_k)
         norm_gamma_k = np.linalg.norm(gamma_k_real)
         if norm_gamma_k > 1e-14: gamma_k_real /= norm_gamma_k
-        else: 
-            gamma_k_real = np.zeros_like(gamma_0_real)
-            if N_grid > 0: gamma_k_real.flat[0] = 1.0 / np.sqrt(N_grid**gamma_0_real.ndim)
+        else: gamma_k_real = np.zeros_like(gamma_0_real); gamma_k_real.flat[0] = 1.0 / np.sqrt(N_grid**gamma_0_real.ndim)
         initial_states_real_space.append(gamma_k_real)
-    return initial_states_real_space
+    return initial_states_real_space, delta_n_vector
 
 # --- Core Functions for I_AB Calculation and Optimization ---
 def calculate_conditional_probs_p_j_given_k_torch(phi_full_torch, x_s_torch, M_val):
@@ -210,229 +205,172 @@ def optimize_phases_pytorch(M_val, x_for_opt_torch, q_priors_torch, is_robust=Fa
     final_phi_list_params = phi_params.detach().numpy().tolist() if num_phases_to_opt > 0 else []
     return np.array([0.0] + final_phi_list_params), history_I_AB_during_opt
 
-# --- Main Experiment Function (Modified for Multiprocessing & SNN) ---
-def run_single_experiment_with_snn(args_tuple):
-    config, experiment_idx, total_experiments, snn_model_state_dict_arg, device_str_arg = args_tuple
-    process_id = os.getpid() 
-    device = torch.device(device_str_arg)
-    print(f"[P{process_id}] Exp {experiment_idx+1}/{total_experiments}: "
-          f"L2Rad={config['L2_uncertainty_ball_radius']:.3f}, M={config['M_states']}, "
-          f"K_SNN={config['K_TRUNC_SNN']}, K_Full={config['K_TRUNC_FULL_EVAL']}")
+# --- Main Function for a Single Config Run ---
+def main(args):
+    print(f"--- Running SNN-based Discrimination for M={args.num_distinct_states_M} States ---")
+    print(f"SNN Model: {args.snn_model_path}")
+    print(f"True Channel Noise Config:")
+    print(f"  Attenuation: {args.true_channel_apply_attenuation}, Factor: {args.true_channel_attenuation_loss_factor}")
+    print(f"  Sobolev Noise: {args.true_channel_apply_sobolev_noise}, Base: {args.true_channel_sobolev_noise_level_base}, Order s: {args.true_channel_sobolev_order_s}")
+    print(f"  Phase Noise: {args.true_channel_apply_phase_noise}, StdDev: {args.true_channel_phase_noise_std_rad}")
+    print(f"L2 Uncertainty Ball Radius for Robust Opt: {args.L2_uncertainty_ball_radius}")
+    print(f"Priors: {args.priors_q_j}")
+    print(f"Number of trials for this config: {args.num_trials_per_config}")
+
+    DEVICE = "cpu" # torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    snn = SimpleSpectralOperatorCNN(K_trunc=config['K_TRUNC_SNN'], 
-                                    hidden_channels=config['snn_hidden_channels'],
-                                    num_hidden_layers=config['snn_num_hidden_layers'])
-    snn.load_state_dict(snn_model_state_dict_arg); snn.to(device); snn.eval()
+    # Load SNN model
+    if not os.path.exists(args.snn_model_path):
+        print(f"ERROR: SNN model file not found at {args.snn_model_path}.")
+        return None
+    snn_model_state_dict = torch.load(args.snn_model_path, map_location=DEVICE)
+    snn = SimpleSpectralOperatorCNN(K_trunc=args.K_TRUNC_SNN, 
+                                    hidden_channels=args.snn_hidden_channels,
+                                    num_hidden_layers=args.snn_num_hidden_layers)
+    snn.load_state_dict(snn_model_state_dict); snn.to(DEVICE); snn.eval()
+    print("SNN model loaded successfully.")
 
-    num_trials_this_experiment = config['num_trials_per_experiment']
     pgm_IAB_on_true_trials, nominal_IAB_on_true_trials, robust_IAB_on_true_trials = [], [], []
-    gram_matrix_diff_norms_trials = [] 
+    
+    # Construct true_channel_config from args
+    true_channel_config = {
+        'apply_attenuation': args.true_channel_apply_attenuation,
+        'attenuation_loss_factor': args.true_channel_attenuation_loss_factor,
+        'apply_additive_sobolev_noise': args.true_channel_apply_sobolev_noise,
+        'sobolev_noise_level_base': args.true_channel_sobolev_noise_level_base,
+        'sobolev_order_s': args.true_channel_sobolev_order_s,
+        'apply_phase_noise': args.true_channel_apply_phase_noise,
+        'phase_noise_std_rad': args.true_channel_phase_noise_std_rad
+    }
+    
+    # Ensure delta_n_vector is numpy array
+    delta_n_vector_gus_np = np.array(args.delta_n_vector_gus_components)
 
-    for i_trial in range(num_trials_this_experiment):
-        initial_states_psi0_real = generate_initial_GUS_states_via_phase_ramp(
-            config['M_states'], config['n_grid_snn_input'], config['l_domain_snn_input'], 
-            config['k_gamma0_band_limit'], np.array(config['delta_n_vector_gus']) 
+
+    for i_trial in range(args.num_trials_per_config):
+        if (i_trial + 1) % (args.num_trials_per_config // 10 or 1) == 0 or args.num_trials_per_config==1 or i_trial==0:
+            print(f"  Starting Trial {i_trial + 1}/{args.num_trials_per_config}...")
+        
+        initial_states_psi0_real, _ = generate_initial_GUS_states_via_phase_ramp(
+            args.num_distinct_states_M, args.n_grid_snn_input, args.l_domain_snn_input, 
+            args.k_gamma0_band_limit, delta_n_vector_gus_np
         )
-        list_gamma_b_k_spectra_Nmax = [get_truncated_spectrum(psi0_real, config['K_TRUNC_SNN']) for psi0_real in initial_states_psi0_real]
+        list_gamma_b_k_spectra = [get_truncated_spectrum(psi0, args.K_TRUNC_SNN) for psi0 in initial_states_psi0_real]
+        list_gamma_a_k_true_spectra = [apply_phenomenological_noise_channel(gb_spec, true_channel_config) for gb_spec in list_gamma_b_k_spectra]
         
-        # True evolved spectra are at K_TRUNC_FULL_EVAL resolution
-        list_gamma_b_k_spectra_Nfull = [get_truncated_spectrum(psi0_real, config['K_TRUNC_FULL_EVAL']) for psi0_real in initial_states_psi0_real]
-        list_gamma_a_k_Nfull_true_spectra = [
-            apply_phenomenological_noise_channel(gb_spec_nfull, config['true_channel_config']) 
-            for gb_spec_nfull in list_gamma_b_k_spectra_Nfull
-        ]
-        
-        G_true = np.zeros((config['M_states'], config['M_states']), dtype=np.complex128)
-        for r_idx in range(config['M_states']):
-            for c_idx in range(config['M_states']):
-                G_true[r_idx, c_idx] = np.vdot(list_gamma_a_k_Nfull_true_spectra[r_idx].ravel(), list_gamma_a_k_Nfull_true_spectra[c_idx].ravel())
+        G_true = np.zeros((args.num_distinct_states_M, args.num_distinct_states_M), dtype=np.complex128)
+        for r_idx in range(args.num_distinct_states_M):
+            for c_idx in range(args.num_distinct_states_M):
+                G_true[r_idx, c_idx] = np.vdot(list_gamma_a_k_true_spectra[r_idx].ravel(), list_gamma_a_k_true_spectra[c_idx].ravel())
         g_j_true_vals = np.linalg.eigvalsh(G_true); g_j_true_vals = np.maximum(1e-7, g_j_true_vals) 
         sqrt_g_j_true_np = np.sqrt(np.sort(g_j_true_vals)[::-1]) 
-        x_true_torch = torch.tensor(sqrt_g_j_true_np, dtype=torch.float64, device=device)
-        q_priors_torch = torch.tensor(config['priors_q_j'], dtype=torch.float64, device=device)
+        x_true_torch = torch.tensor(sqrt_g_j_true_np, dtype=torch.float64, device=DEVICE)
+        q_priors_torch = torch.tensor(args.priors_q_j, dtype=torch.float64, device=DEVICE)
 
-        list_gamma_a_k_snn_pred_spectra_Nmax_np = []
+        list_gamma_a_k_snn_pred_spectra_np = []
         with torch.no_grad():
-            for gamma_b_Nmax_spec in list_gamma_b_k_spectra_Nmax:
-                gamma_b_channels = spectrum_complex_to_channels_torch(gamma_b_Nmax_spec).unsqueeze(0).to(device) 
+            for gamma_b_spec in list_gamma_b_k_spectra:
+                gamma_b_channels = spectrum_complex_to_channels_torch(gamma_b_spec).unsqueeze(0).to(DEVICE) 
                 gamma_a_pred_channels = snn(gamma_b_channels)
                 gamma_a_pred_complex = channels_to_spectrum_complex_torch(gamma_a_pred_channels.squeeze(0).cpu())
                 norm_pred_sq = torch.sum(torch.abs(gamma_a_pred_complex)**2)
                 if norm_pred_sq > 1e-12: gamma_a_pred_complex /= torch.sqrt(norm_pred_sq)
                 else: gamma_a_pred_complex = torch.zeros_like(gamma_a_pred_complex)
-                list_gamma_a_k_snn_pred_spectra_Nmax_np.append(gamma_a_pred_complex.numpy())
+                list_gamma_a_k_snn_pred_spectra_np.append(gamma_a_pred_complex.numpy())
         
-        G_est = np.zeros((config['M_states'], config['M_states']), dtype=np.complex128)
-        for r_idx in range(config['M_states']):
-            for c_idx in range(config['M_states']):
-                G_est[r_idx, c_idx] = np.vdot(list_gamma_a_k_snn_pred_spectra_Nmax_np[r_idx].ravel(), list_gamma_a_k_snn_pred_spectra_Nmax_np[c_idx].ravel())
+        G_est = np.zeros((args.num_distinct_states_M, args.num_distinct_states_M), dtype=np.complex128)
+        for r_idx in range(args.num_distinct_states_M):
+            for c_idx in range(args.num_distinct_states_M):
+                G_est[r_idx, c_idx] = np.vdot(list_gamma_a_k_snn_pred_spectra_np[r_idx].ravel(), list_gamma_a_k_snn_pred_spectra_np[c_idx].ravel())
         g_j_estimated_vals = np.linalg.eigvalsh(G_est); g_j_estimated_vals = np.maximum(1e-7, g_j_estimated_vals)
         sqrt_g_j_estimated_np = np.sqrt(np.sort(g_j_estimated_vals)[::-1])
-        x_estimated_torch = torch.tensor(sqrt_g_j_estimated_np, dtype=torch.float64, device=device)
+        x_estimated_torch = torch.tensor(sqrt_g_j_estimated_np, dtype=torch.float64, device=DEVICE)
 
-        gram_diff_F_norm = np.linalg.norm(G_true - G_est, 'fro') # G_true is from N_full, G_est from N_max
-        gram_matrix_diff_norms_trials.append(gram_diff_F_norm)
-
-        phi_pgm_np = np.zeros(config['M_states']) 
-        I_AB_pgm_on_true = calculate_I_AB_numpy(phi_pgm_np, config['M_states'], sqrt_g_j_true_np, config['priors_q_j'])
+        phi_pgm_np = np.zeros(args.num_distinct_states_M) 
+        I_AB_pgm_on_true = calculate_I_AB_numpy(phi_pgm_np, args.num_distinct_states_M, sqrt_g_j_true_np, args.priors_q_j)
         pgm_IAB_on_true_trials.append(I_AB_pgm_on_true) 
 
-        phi_nom_opt_np, _ = optimize_phases_pytorch(config['M_states'], x_estimated_torch, q_priors_torch, is_robust=False, num_epochs=config['max_pytorch_opt_epochs'], lr=config['pytorch_lr'], trial_info=f"P{process_id}Tr{i_trial+1}Nom")
-        I_AB_phi_nom_on_true = calculate_I_AB_numpy(phi_nom_opt_np, config['M_states'], sqrt_g_j_true_np, config['priors_q_j'])
+        phi_nom_opt_np, _ = optimize_phases_pytorch(args.num_distinct_states_M, x_estimated_torch, q_priors_torch, is_robust=False, num_epochs=args.max_pytorch_opt_epochs, lr=args.pytorch_lr, trial_info=f"Tr{i_trial+1}Nom")
+        I_AB_phi_nom_on_true = calculate_I_AB_numpy(phi_nom_opt_np, args.num_distinct_states_M, sqrt_g_j_true_np, args.priors_q_j)
         nominal_IAB_on_true_trials.append(I_AB_phi_nom_on_true)
 
-        L2_ball_rad_config = config['L2_uncertainty_ball_radius']
-        phi_rob_opt_np, _ = optimize_phases_pytorch(config['M_states'], x_true_torch, q_priors_torch, is_robust=True, x_center_for_robust_np=sqrt_g_j_estimated_np, L2_ball_radius_for_robust=L2_ball_rad_config, num_epochs=config['max_pytorch_opt_epochs'], lr=config['pytorch_lr'], trial_info=f"P{process_id}Tr{i_trial+1}Rob")
-        I_AB_phi_rob_on_true = calculate_I_AB_numpy(phi_rob_opt_np, config['M_states'], sqrt_g_j_true_np, config['priors_q_j'])
+        phi_rob_opt_np, _ = optimize_phases_pytorch(args.num_distinct_states_M, x_true_torch, q_priors_torch, is_robust=True, x_center_for_robust_np=sqrt_g_j_estimated_np, L2_ball_radius_for_robust=args.L2_uncertainty_ball_radius, num_epochs=args.max_pytorch_opt_epochs, lr=args.pytorch_lr, trial_info=f"Tr{i_trial+1}Rob")
+        I_AB_phi_rob_on_true = calculate_I_AB_numpy(phi_rob_opt_np, args.num_distinct_states_M, sqrt_g_j_true_np, args.priors_q_j)
         robust_IAB_on_true_trials.append(I_AB_phi_rob_on_true)
         
-        if (i_trial + 1) % (num_trials_this_experiment // 5 or 1) == 0 :
-            print(f"    [P{process_id}] Exp {experiment_idx+1}, T{i_trial+1}: G_diff={gram_diff_F_norm:.4f}, PGM={I_AB_pgm_on_true:.4f}, Nom={I_AB_phi_nom_on_true:.4f}, Rob={I_AB_phi_rob_on_true:.4f}")
-
     avg_pgm_IAB = np.mean(pgm_IAB_on_true_trials); avg_nominal_IAB = np.mean(nominal_IAB_on_true_trials); avg_robust_IAB = np.mean(robust_IAB_on_true_trials)
-    avg_gram_diff_F_norm = np.mean(gram_matrix_diff_norms_trials)
-    
-    t_statistic_rob_gt_nom, p_value_rob_gt_nom = -1.0, 1.0 
-    t_statistic_nom_gt_pgm, p_value_nom_gt_pgm = -1.0, 1.0
-    t_statistic_rob_gt_pgm, p_value_rob_gt_pgm = -1.0, 1.0
-    if num_trials_this_experiment > 1:
+    t_rob_nom, p_rob_nom, t_nom_pgm, p_nom_pgm, t_rob_pgm, p_rob_pgm = [-1.0]*6 
+    if args.num_trials_per_config > 1:
         nom_v, rob_v, pgm_v = np.array(nominal_IAB_on_true_trials), np.array(robust_IAB_on_true_trials), np.array(pgm_IAB_on_true_trials)
         mask = ~np.isnan(nom_v) & ~np.isnan(rob_v) & ~np.isnan(pgm_v)
         nom_v, rob_v, pgm_v = nom_v[mask], rob_v[mask], pgm_v[mask]
         if len(rob_v) > 1: 
-            t_statistic_rob_gt_nom, p_value_rob_gt_nom = stats.ttest_rel(rob_v, nom_v, alternative='greater')
-            t_statistic_nom_gt_pgm, p_value_nom_gt_pgm = stats.ttest_rel(nom_v, pgm_v, alternative='greater')
-            t_statistic_rob_gt_pgm, p_value_rob_gt_pgm = stats.ttest_rel(rob_v, pgm_v, alternative='greater')
-            for t_stat_arr_ref in [t_statistic_rob_gt_nom, t_statistic_nom_gt_pgm, t_statistic_rob_gt_pgm]:
-                 if np.isnan(t_stat_arr_ref): t_stat_arr_ref = 0.0 
-            if np.isnan(p_value_rob_gt_nom): p_value_rob_gt_nom = 0.5 if np.allclose(rob_v, nom_v) else 1.0
-            if np.isnan(p_value_nom_gt_pgm): p_value_nom_gt_pgm = 0.5 if np.allclose(nom_v, pgm_v) else 1.0
-            if np.isnan(p_value_rob_gt_pgm): p_value_rob_gt_pgm = 0.5 if np.allclose(rob_v, pgm_v) else 1.0
+            t_rob_nom, p_rob_nom = stats.ttest_rel(rob_v, nom_v, alternative='greater')
+            t_nom_pgm, p_nom_pgm = stats.ttest_rel(nom_v, pgm_v, alternative='greater')
+            t_rob_pgm, p_rob_pgm = stats.ttest_rel(rob_v, pgm_v, alternative='greater')
+            for t_val_ref, p_val_ref in [(t_rob_nom, p_rob_nom), (t_nom_pgm, p_nom_pgm), (t_rob_pgm, p_rob_pgm)]:
+                if np.isnan(t_val_ref): t_val_ref = 0.0
+                if np.isnan(p_val_ref): p_val_ref = 0.5 
     
-    result_summary = {"config": config, "avg_pgm_IAB": avg_pgm_IAB, "avg_nominal_IAB": avg_nominal_IAB, 
-                      "avg_robust_IAB": avg_robust_IAB, "avg_gram_diff_F_norm": avg_gram_diff_F_norm,
-                      "t_statistic_rob_gt_nom": float(t_statistic_rob_gt_nom), "p_value_rob_gt_nom": float(p_value_rob_gt_nom),
-                      "t_statistic_nom_gt_pgm": float(t_statistic_nom_gt_pgm), "p_value_nom_gt_pgm": float(p_value_nom_gt_pgm),
-                      "t_statistic_rob_gt_pgm": float(t_statistic_rob_gt_pgm), "p_value_rob_gt_pgm": float(p_value_rob_gt_pgm)
-                     }
-    RESULTS_DIR_INDIVIDUAL = "results_snn_robust_sweep_individual_GUS_nonortho" 
-    os.makedirs(RESULTS_DIR_INDIVIDUAL, exist_ok=True)
-    filename_parts = [f"M{config['M_states']}", f"K_SNN{config['K_TRUNC_SNN']}", f"K_Full{config['K_TRUNC_FULL_EVAL']}", f"L2rad{config['L2_uncertainty_ball_radius']:.3f}"]
-    filename = f"exp_{'_'.join(filename_parts)}_SNN_GUS.json"
-    filepath = os.path.join(RESULTS_DIR_INDIVIDUAL, filename)
+    results = {"params": {k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in vars(args).items()}, "avg_pgm_IAB": avg_pgm_IAB, "avg_nominal_IAB": avg_nominal_IAB, 
+               "avg_robust_IAB": avg_robust_IAB, 
+               "t_statistic_rob_gt_nom": float(t_rob_nom), "p_value_rob_gt_nom": float(p_rob_nom),
+               "t_statistic_nom_gt_pgm": float(t_nom_pgm), "p_value_nom_gt_pgm": float(p_nom_pgm),
+               "t_statistic_rob_gt_pgm": float(t_rob_pgm), "p_value_rob_gt_pgm": float(p_rob_pgm)
+              }
+    os.makedirs(args.results_dir, exist_ok=True)
+    
+    noise_parts = []
+    if args.true_channel_apply_attenuation: noise_parts.append(f"att{args.true_channel_attenuation_loss_factor:.2f}")
+    if args.true_channel_apply_sobolev_noise: noise_parts.append(f"sob{args.true_channel_sobolev_noise_level_base:.3f}s{args.true_channel_sobolev_order_s:.1f}")
+    if args.true_channel_apply_phase_noise: noise_parts.append(f"ph{args.true_channel_phase_noise_std_rad:.2f}")
+    noise_str_for_file = "_".join(noise_parts) if noise_parts else "no_noise"
+    
+    output_filename = f"results_M{args.num_distinct_states_M}_L2rad{args.L2_uncertainty_ball_radius:.3f}_{noise_str_for_file}.json"
+    output_filepath = os.path.join(args.results_dir, output_filename)
     try:
-        serializable_config = {k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in result_summary["config"].items()}
-        serializable_summary = {key: (float(val) if isinstance(val, (np.float32, np.float64, np.float_)) else val) for key, val in result_summary.items() if key != "config"} 
-        serializable_summary["config_params"] = serializable_config 
-        with open(filepath, 'w') as f: json.dump(serializable_summary, f, indent=4)
-    except Exception as e: print(f"  [P{process_id}] Exp {experiment_idx+1} FAILED to save results: {e}")
-    print(f"[P{process_id}] Finished Exp {experiment_idx+1}/{total_experiments}")
-    return result_summary
+        with open(output_filepath, 'w') as f: json.dump({k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in results.items()}, f, indent=4)
+        print(f"\nResults for this run saved to: {output_filepath}")
+    except Exception as e: print(f"Error saving results to {output_filepath}: {e}")
+    return results
+
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Run SNN-based state discrimination experiments with robust POVM optimization.")
-    parser.add_argument('--k_trunc_snn', type=int, default=32, help='N_max: Truncation for SNN input/output.')
-    parser.add_argument('--k_trunc_full', type=int, default=64, help='N_full_max: Full resolution for true channel evaluation.')
-    parser.add_argument('--snn_model_dir', type=str, default="trained_snn_models", help="Directory of SNN models.")
-    parser.add_argument('--snn_hidden_channels', type=int, default=64, help="Hidden channels in SNN.")
-    parser.add_argument('--snn_num_hidden_layers', type=int, default=3, help="Number of hidden layers in SNN.")
-    # Sweep parameters (can be lists if you modify the script to loop over them, or single values for one run)
-    parser.add_argument('--M_states_sweep', nargs='+', type=int, default=[3, 4], help='List of M values (number of distinct states).')
-    parser.add_argument('--L2_radius_sweep', nargs='+', type=float, default=[0.65], help='List of L2 uncertainty ball radii.')
-    # Other fixed parameters for the experiment setup
-    parser.add_argument('--num_trials', type=int, default=30, help="Number of trials per experiment configuration.")
-    parser.add_argument('--n_grid_snn_input', type=int, default=64, help="Grid size for generating initial psi_0 for SNN input.")
-    parser.add_argument('--l_domain_snn_input', type=float, default=2*np.pi, help="Domain size for initial state generation.")
-    parser.add_argument('--k_gamma0_band_limit', type=int, default=12, help="Bandwidth for the base gamma_0 state.")
-    parser.add_argument('--delta_n_x', type=int, default=1, help="X-component of delta_n vector for GUS phase ramp.")
-    parser.add_argument('--delta_n_y', type=int, default=0, help="Y-component of delta_n vector for GUS phase ramp (if 2D).")
+    parser = argparse.ArgumentParser(description="Run SNN-based state discrimination with robust POVM optimization.")
+    # SNN related
+    parser.add_argument('--snn_model_path', type=str, default="trained_snn_models/snn_K32_H64_L3_att0.20_sob0.020s1.0_ph0.15.pth")
+    parser.add_argument('--K_TRUNC_SNN', type=int, default=32)
+    parser.add_argument('--snn_hidden_channels', type=int, default=64)
+    parser.add_argument('--snn_num_hidden_layers', type=int, default=3)
+    # Initial state generation
+    parser.add_argument('--n_grid_snn_input', type=int, default=64)
+    parser.add_argument('--l_domain_snn_input', type=float, default=2*np.pi)
+    parser.add_argument('--k_gamma0_band_limit', type=int, default=12)
+    parser.add_argument('--delta_n_vector_gus_components', nargs='+', type=int, default=[1, 0])
+    # True channel config 
+    parser.add_argument('--true_channel_apply_attenuation', action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument('--true_channel_attenuation_loss_factor', type=float, default=0.2)
+    parser.add_argument('--true_channel_apply_sobolev_noise', action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument('--true_channel_sobolev_noise_level_base', type=float, default=0.01)
+    parser.add_argument('--true_channel_sobolev_order_s', type=float, default=1.0)
+    parser.add_argument('--true_channel_apply_phase_noise', action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument('--true_channel_phase_noise_std_rad', type=float, default=0.05)
+    # Discrimination and Optimization parameters
+    parser.add_argument('--num_distinct_states_M', type=int, default=3)
+    parser.add_argument('--L2_uncertainty_ball_radius', type=float, default=0.1)
+    parser.add_argument('--num_trials_per_config', type=int, default=30) 
     parser.add_argument('--max_pytorch_opt_epochs', type=int, default=300)
     parser.add_argument('--pytorch_lr', type=float, default=0.005)
-    parser.add_argument('--results_dir_sweep', type=str, default="results_snn_robust_sweep_summary_final")
-    parser.add_argument('--results_dir_individual', type=str, default="results_snn_robust_sweep_individual_final")
-
+    parser.add_argument('--priors_q_j', nargs='+', type=float, default=None) # Default to None, set based on M
+    parser.add_argument('--results_dir', type=str, default="results_snn_robust_single_run")
+    
     args = parser.parse_args()
 
-    SNN_MODEL_FILENAME = f"snn_K{args.k_trunc_snn}_H{args.snn_hidden_channels}_L{args.snn_num_hidden_layers}_multires.pth"
-    SNN_MODEL_PATH = os.path.join(args.snn_model_dir, SNN_MODEL_FILENAME)
-    
-    TRUE_CHANNEL_CONFIG = { 
-        'apply_attenuation': True, 'attenuation_loss_factor': 0.2,
-        'apply_additive_sobolev_noise': True, 'sobolev_noise_level_base': 0.01, 'sobolev_order_s': 1.0,
-        'apply_phase_noise': True, 'phase_noise_std_rad': 0.05
-    }
-        
-    config_base = {
-        'num_trials_per_experiment': args.num_trials, 
-        'K_TRUNC_SNN': args.k_trunc_snn,
-        'K_TRUNC_FULL_EVAL': args.k_trunc_full, 
-        'n_grid_snn_input': args.n_grid_snn_input,
-        'l_domain_snn_input': args.l_domain_snn_input, 
-        'k_gamma0_band_limit': args.k_gamma0_band_limit,
-        'delta_n_vector_gus': [args.delta_n_x, args.delta_n_y] if args.n_grid_snn_input > 1 else [args.delta_n_x], # Adjust for 1D/2D based on N_grid
-        'true_channel_config': TRUE_CHANNEL_CONFIG,
-        'snn_hidden_channels': args.snn_hidden_channels, 
-        'snn_num_hidden_layers': args.snn_num_hidden_layers, 
-        'max_pytorch_opt_epochs': args.max_pytorch_opt_epochs, 
-        'pytorch_lr': args.pytorch_lr 
-    }
-    print(f"--- Starting SNN-based Parameter Sweep (Non-Orthogonal GUS Initial States) ---")
-    
-    if not os.path.exists(SNN_MODEL_PATH):
-        print(f"ERROR: SNN model file not found at {SNN_MODEL_PATH}. Train SNN first or provide correct path/params."); exit()
-    snn_model_state_dict_main = torch.load(SNN_MODEL_PATH, map_location=torch.device('cpu')) 
+    # Set default priors if not provided
+    if args.priors_q_j is None:
+        if args.num_distinct_states_M == 3: args.priors_q_j = [0.7, 0.15, 0.15]
+        elif args.num_distinct_states_M == 5: args.priors_q_j = [0.4,0.25,0.15,0.1,0.1]
+        else: args.priors_q_j = [1.0/args.num_distinct_states_M]*args.num_distinct_states_M
+    args.priors_q_j = np.array(args.priors_q_j) / np.sum(args.priors_q_j) # Normalize
 
-    param_configurations_for_pool = []
-    param_combinations = list(product(args.M_states_sweep, args.L2_radius_sweep))
-    total_experiments = len(param_combinations)
-
-    for i_exp, (n_states, l2_rad) in enumerate(param_combinations):
-        current_config = config_base.copy()
-        current_config['M_states'] = n_states
-        # Define priors based on n_states (example)
-        if n_states == 3: current_config['priors_q_j'] = np.array([0.7, 0.15, 0.15])
-        elif n_states == 5: current_config['priors_q_j'] = np.array([0.4,0.25,0.15,0.1,0.1])
-        else: current_config['priors_q_j'] = np.array([1.0/n_states]*n_states)
-        current_config['priors_q_j'] = current_config['priors_q_j'] / np.sum(current_config['priors_q_j'])
-        current_config['L2_uncertainty_ball_radius'] = l2_rad
-        param_configurations_for_pool.append((current_config, i_exp, total_experiments, snn_model_state_dict_main, "cpu")) 
-
-    num_processes = min(multiprocessing.cpu_count(), len(param_configurations_for_pool), 4) 
-    print(f"Using {num_processes} processes for parallel execution.")
-    
-    all_results_summary_list = []
-    if num_processes > 0 and len(param_configurations_for_pool) > 0:
-        with multiprocessing.Pool(processes=num_processes) as pool:
-            all_results_summary_list = pool.map(run_single_experiment_with_snn, param_configurations_for_pool)
-    elif len(param_configurations_for_pool) > 0: 
-        print("Running experiments sequentially...")
-        for config_tuple_val_item in param_configurations_for_pool: 
-            all_results_summary_list.append(run_single_experiment_with_snn(config_tuple_val_item)) 
-            
-    all_results_summary_list.sort(key=lambda r: (r['config']['M_states'], r['config']['L2_uncertainty_ball_radius']))
-
-    print("\n\n--- Parameter Sweep Results Summary (SNN Surrogate, L2 Ball Robustness, Non-Orthogonal GUS) ---")
-    header = "| M | L2 Radius | Avg PGM IAB   | AvgNominal IAB | AvgRobust IAB | AvgGramDiffF | t(Rob>Nom) | p(Rob>Nom) | t(Nom>PGM) | p(Nom>PGM) | t(Rob>PGM) | p(Rob>PGM) |"
-    print(header); print("|" + "-"*(len(header)-2) + "|")
-    for res in all_results_summary_list:
-        cfg = res['config']
-        print(f"| {cfg['M_states']:<1d} | {cfg['L2_uncertainty_ball_radius']:<9.3f} | "
-              f"{res['avg_pgm_IAB']:<13.4f} | {res['avg_nominal_IAB']:<14.4f} | {res['avg_robust_IAB']:<13.4f} | "
-              f"{res.get('avg_gram_diff_F_norm', float('nan')):<12.4f} | "
-              f"{res['t_statistic_rob_gt_nom']:<10.3f} | {res['p_value_rob_gt_nom']:<10.4f} | "
-              f"{res['t_statistic_nom_gt_pgm']:<10.3f} | {res['p_value_nom_gt_pgm']:<10.4f} | "
-              f"{res['t_statistic_rob_gt_pgm']:<10.3f} | {res['p_value_rob_gt_pgm']:<10.4f} |")
-
-    os.makedirs(args.results_dir_sweep, exist_ok=True)
-    csv_path = os.path.join(args.results_dir_sweep, f"param_sweep_summary_SNN_L2_Robust_NonOrthoGUS_K{args.k_trunc_snn}_F{args.k_trunc_full}.csv")
-    with open(csv_path, 'w') as f:
-        f.write("M_states,L2Radius,AvgPgmIAB,AvgNominalIAB,AvgRobustIAB,AvgGramDiffF,TRobGtNom,PRobGtNom,TNomGtPGM,PNomGtPGM,TRobGtPGM,PRobGtPGM\n")
-        for res in all_results_summary_list:
-            cfg = res['config']
-            f.write(f"{cfg['M_states']},{cfg['L2_uncertainty_ball_radius']},"
-                    f"{res['avg_pgm_IAB']},{res['avg_nominal_IAB']},{res['avg_robust_IAB']},{res.get('avg_gram_diff_F_norm', float('nan'))},"
-                    f"{res['t_statistic_rob_gt_nom']},{res['p_value_rob_gt_nom']},"
-                    f"{res['t_statistic_nom_gt_pgm']},{res['p_value_nom_gt_pgm']},"
-                    f"{res['t_statistic_rob_gt_pgm']},{res['p_value_rob_gt_pgm']}\n")
-    print(f"\nSummary results saved to CSV: {csv_path}")
-
+    main(args)
