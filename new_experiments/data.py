@@ -4,7 +4,11 @@ import matplotlib.pyplot as plt
 import argparse 
 import torch # For GaussianRF
 
-# --- GaussianRF Class (from user) ---
+# --- Global constants for solver (can be moved to args if needed) ---
+HBAR_CONST = 1.0
+MASS_CONST = 1.0
+
+# --- GaussianRF Class ---
 class GaussianRF(object):
     def __init__(self, dim, size, alpha=2, tau=3, sigma=None, boundary="periodic", device=None):
         self.dim = dim
@@ -18,7 +22,22 @@ class GaussianRF(object):
 
         k_max = size // 2
 
-        if dim == 2:
+        if dim == 1:
+            import math
+            if k_max > 0:
+                k_range = torch.arange(start=0, end=k_max, step=1, device=self.device)
+                k = torch.cat((k_range, torch.arange(start=-k_max, end=0, step=1, device=self.device)), 0)
+            else: 
+                k = torch.tensor([0], device=self.device)
+            
+            self.sqrt_eig = (size * math.sqrt(2.0) * sigma * ((4 * (math.pi**2) * (k**2) + tau**2) ** (-alpha/2.0)))
+            
+            if self.sqrt_eig.numel() > 0 and k_max > 0 : 
+                self.sqrt_eig[0] = 0.0
+            elif self.sqrt_eig.numel() > 0 and k_max == 0 :
+                pass 
+
+        elif dim == 2:
             import math
             if k_max > 0:
                 k_range = torch.arange(start=0, end=k_max, step=1, device=self.device)
@@ -26,14 +45,14 @@ class GaussianRF(object):
             else:
                 wavenumbers_half = torch.tensor([0], device=self.device)
             
-            wavenumbers = wavenumbers_half.repeat(size,1) # This creates [size, size] if k_max=0 and wavenumbers_half=[0]
+            wavenumbers = wavenumbers_half.repeat(size,1)
 
             k_x = wavenumbers.transpose(0, 1)
             k_y = wavenumbers
             
             self.sqrt_eig = ((size**2)*math.sqrt(2.0)*sigma*((4*(math.pi**2)*(k_x**2+k_y**2)+tau**2)**(-alpha/2.0)))
             if self.sqrt_eig.numel() > 0 and k_max > 0 : 
-                self.sqrt_eig[0,0] = 0.0 # DC component of the full spectrum
+                self.sqrt_eig[0,0] = 0.0
         else:
             raise ValueError("Dimension must be 1 or 2 for this GRF implementation.")
         
@@ -41,24 +60,21 @@ class GaussianRF(object):
 
     def sample(self, N_samples):
         if self.sqrt_eig.numel() == 0 and self.size_tuple[0] > 0 : 
-             # This can happen if size is 1, k_max is 0, and dim=1 k construction leads to empty sqrt_eig
-             # or if k_max = 0 for dim=2, sqrt_eig might be scalar 0.
-             # Should return zeros of appropriate shape if no spectral components.
-            print(f"Warning: sqrt_eig is empty or scalar zero for GRF. size_tuple: {self.size_tuple}. Returning zeros.")
+            print(f"Warning: sqrt_eig is empty for GRF. size_tuple: {self.size_tuple}. Returning zeros.")
             return torch.zeros(N_samples, *self.size_tuple, dtype=torch.float32) 
             
         coeff = torch.randn(N_samples, *self.size_tuple, dtype=torch.cfloat, device=self.device)
-        # Element-wise multiplication; sqrt_eig needs to broadcast or match shape
-        if self.dim == 1 and N_samples > 1 and self.sqrt_eig.ndim == 1:
-            coeff = self.sqrt_eig.unsqueeze(0) * coeff
-        else:
-            coeff = self.sqrt_eig * coeff # Assumes broadcasting for N_samples > 1
+        if self.sqrt_eig.numel() > 0 : 
+            if self.dim == 1 and N_samples > 1 and self.sqrt_eig.ndim == 1:
+                coeff = self.sqrt_eig.unsqueeze(0) * coeff
+            else:
+                coeff = self.sqrt_eig * coeff 
             
         return torch.fft.ifftn(coeff, dim=list(range(-self.dim, 0))).real
 
-# --- Poisson Solver Functions (from user) ---
+# --- Poisson Solver Functions ---
 def solve_poisson_2d_rfft(f_hat_r: np.ndarray, enforce_zero_mean: bool = True) -> np.ndarray:
-    N1, M = f_hat_r.shape
+    N1, M_rfft = f_hat_r.shape
     u_hat_r = np.zeros_like(f_hat_r, dtype=np.complex128)
     
     if enforce_zero_mean:
@@ -71,7 +87,7 @@ def solve_poisson_2d_rfft(f_hat_r: np.ndarray, enforce_zero_mean: bool = True) -
         else:
             k1_shifted = k1_idx - N1
 
-        for k2_idx in range(M):
+        for k2_idx in range(M_rfft):
             k2_shifted = k2_idx 
             
             if k1_shifted == 0 and k2_shifted == 0:
@@ -108,16 +124,64 @@ def add_hierarchical_offset_2d(f: np.ndarray, K_max: int = 6, sigma: float = 0.5
         
     return f + mu
 
+# --- Schrodinger Solvers ---
+def split_step_solver_2d(V_grid, psi0, N, dx, T, num_steps, hbar_val, m_val):
+    dt = T/num_steps
+    psi = psi0.astype(np.complex128).copy() 
+    
+    V_op = np.exp(-0.5j * dt / hbar_val * V_grid)
+    
+    k_vec = 2.0 * np.pi * np.fft.fftfreq(N, d=dx)
+    kx, ky = np.meshgrid(k_vec, k_vec, indexing='ij')
+    k2 = kx**2 + ky**2
+    K_op = np.exp(-0.5j * hbar_val * dt / m_val * k2)
+
+    for _ in range(num_steps):
+        psi = psi * V_op 
+        psi_k = np.fft.fft2(psi)
+        psi_k = psi_k * K_op 
+        psi = np.fft.ifft2(psi_k)
+        psi = psi * V_op 
+    return psi
+
+def solver_main(V_potential, psi0_real_space, N_grid, L_domain, T_evolution, num_solver_steps, hbar, m):
+    dx = L_domain / N_grid
+    norm_psi0 = np.linalg.norm(psi0_real_space)
+    if norm_psi0 > 1e-14:
+        psi0_normalized = psi0_real_space / norm_psi0
+    else: 
+        psi0_normalized = np.zeros_like(psi0_real_space)
+        if N_grid > 0:
+            psi0_normalized.flat[0] = 1.0 
+            psi0_normalized = psi0_normalized / np.linalg.norm(psi0_normalized)
+
+    psi_T = split_step_solver_2d(V_potential, psi0_normalized, N_grid, dx, T_evolution, num_solver_steps, hbar, m)
+    
+    norm_psi_T = np.linalg.norm(psi_T)
+    if norm_psi_T > 1e-14:
+        psi_T = psi_T / norm_psi_T
+    return psi_T
+
+# --- Waveguide Potential ---
+def get_step_index_fiber_potential(N_grid, L_domain, core_radius_factor, potential_depth):
+    actual_core_radius = core_radius_factor * (L_domain / 2.0)
+    coords1d = np.linspace(-L_domain / 2.0, L_domain / 2.0, N_grid, endpoint=False)
+    x_mg, y_mg = np.meshgrid(coords1d, coords1d, indexing='ij')
+    rr = np.sqrt(x_mg**2 + y_mg**2)
+    potential = np.zeros((N_grid, N_grid), dtype=float)
+    potential[rr < actual_core_radius] = -potential_depth 
+    return potential
+
 # --- Helper Functions for Spectra ---
-def get_full_centered_spectrum(psi_real_space):
-    """ Computes full 2D FFT and shifts it. Output is NOT normalized here."""
+def get_full_centered_spectrum(psi_real_space): 
+    """ Computes full 2D FFT and shifts it. Output is UNNORMALIZED."""
     N_grid = psi_real_space.shape[0]
     if N_grid == 0:
         return np.array([], dtype=np.complex64)
     F_psi_shifted = np.fft.fftshift(np.fft.fft2(psi_real_space))
     return F_psi_shifted
 
-def normalize_spectrum(spectrum_complex):
+def normalize_spectrum(spectrum_complex): 
     """ Normalizes a given spectrum so sum(|coeffs|^2)=1. """
     if spectrum_complex.size == 0:
         return spectrum_complex
@@ -126,67 +190,26 @@ def normalize_spectrum(spectrum_complex):
         return spectrum_complex / np.sqrt(norm_sq)
     return np.zeros_like(spectrum_complex)
 
-def extract_center_block(full_spectrum_centered, K_extract):
-    """ Extracts central K_extract x K_extract block. Output is NOT normalized here."""
+def extract_center_block(full_spectrum_centered, K_extract): 
+    """ Extracts central K_extract x K_extract block. Output is UNNORMALIZED. """
     N_full = full_spectrum_centered.shape[0]
     if K_extract == N_full:
         return full_spectrum_centered
     if K_extract > N_full:
-        raise ValueError(f"K_extract ({K_extract}) cannot be larger than full_spectrum size ({N_full}) for simple extraction.")
+        raise ValueError(f"K_extract ({K_extract}) > full_spectrum size ({N_full}). Padding not implemented here, should be handled by SNN if needed.")
     if K_extract <= 0:
         return np.array([], dtype=np.complex64)
     
     start_idx = N_full // 2 - K_extract // 2
     end_idx = start_idx + K_extract
-    extracted_block = full_spectrum_centered[start_idx:end_idx, start_idx:end_idx]
-    return extracted_block
+    return full_spectrum_centered[start_idx:end_idx, start_idx:end_idx]
 
-def apply_phenomenological_noise_channel(spectrum_b_full_normalized, config_channel_noise):
-    """ Applies noise to a FULL (N_grid x N_grid) normalized spectrum. Output is also full and normalized. """
-    c_current = spectrum_b_full_normalized.copy()
-    N_grid = c_current.shape[0] 
-    if N_grid == 0:
-        return c_current
-        
-    if N_grid % 2 == 0:
-        k_vals_one_dim_eff = np.arange(-N_grid//2, N_grid//2)
-    else:
-        k_vals_one_dim_eff = np.arange(-(N_grid-1)//2, (N_grid-1)//2 + 1)
-    kx_eff_grid, ky_eff_grid = np.meshgrid(k_vals_one_dim_eff, k_vals_one_dim_eff, indexing='ij')
-
-    if config_channel_noise.get('apply_attenuation', False):
-        loss_factor = config_channel_noise.get('attenuation_loss_factor', 0.1) 
-        norm_sq_grid = kx_eff_grid**2 + ky_eff_grid**2
-        max_norm_sq_in_grid = np.max(norm_sq_grid) if N_grid > 1 else 1.0
-        if max_norm_sq_in_grid < 1e-9: 
-            max_norm_sq_in_grid = 1.0 
-        attenuation_profile = np.exp(-loss_factor * norm_sq_grid / max_norm_sq_in_grid)
-        c_current = c_current * attenuation_profile
-        
-    if config_channel_noise.get('apply_additive_sobolev_noise', False):
-        noise_level_base = config_channel_noise.get('sobolev_noise_level_base', 0.01)
-        sobolev_order_s = config_channel_noise.get('sobolev_order_s', 1.0) 
-        base_complex_noise = np.random.randn(N_grid, N_grid) + 1j * np.random.randn(N_grid, N_grid)
-        sobolev_denominators = (1 + kx_eff_grid**2 + ky_eff_grid**2)**(sobolev_order_s / 2.0)
-        sobolev_denominators[sobolev_denominators < 1e-9] = 1.0 
-        scaled_noise = noise_level_base * (base_complex_noise / sobolev_denominators)
-        c_current = c_current + scaled_noise
-        
-    if config_channel_noise.get('apply_phase_noise', False):
-        phase_noise_std = config_channel_noise.get('phase_noise_std_rad', 0.1) 
-        random_phases = np.random.randn(N_grid, N_grid) * phase_noise_std 
-        c_current = c_current * np.exp(1j * random_phases)
-            
-    # Re-normalize after all noise applications
-    c_current = normalize_spectrum(c_current)
-    return c_current
-
-def generate_snn_dataset(num_samples, N_grid_sim_input, 
-                         K_psi0_band_limit, # Used by random_low_order_state
+# --- Main Data Generation Function ---
+def generate_snn_dataset(num_samples, N_grid_sim_input, K_psi0_band_limit, 
                          K_trunc_snn_output, 
                          pde_type,
-                         channel_config, 
                          grf_config,     
+                         waveguide_config, 
                          save_path_template,
                          filename_suffix_str):
     dataset_gamma_b_full_input = []
@@ -197,60 +220,72 @@ def generate_snn_dataset(num_samples, N_grid_sim_input,
     print(f"  Input resolution (gamma_b_full_input & gamma_a_true_full_output): {N_grid_sim_input}x{N_grid_sim_input}")
     print(f"  SNN Target output resolution (gamma_a_snn_target): {K_trunc_snn_output}x{K_trunc_snn_output}")
 
-    grf_device = torch.device("cpu") # GRF on CPU for numpy compatibility later
-    grf_generator = GaussianRF(dim=2, size=N_grid_sim_input, 
-                               alpha=grf_config['alpha'], tau=grf_config['tau'], 
-                               device=grf_device)
+    if pde_type == "poisson" or pde_type == "step_index_fiber": 
+        grf_generator = GaussianRF(dim=2, size=N_grid_sim_input, 
+                                   alpha=grf_config['alpha'], tau=grf_config['tau'], 
+                                   device=torch.device("cpu"))
 
     for i in range(num_samples):
         if (i+1) % (num_samples // 10 or 1) == 0:
             print(f"  Generating sample {i+1}/{num_samples}")
 
-        initial_real_space_state = None 
-        gamma_b_full_spec_for_snn_input = None
-        gamma_a_true_full_spec_for_output = None 
-
-        if pde_type == "phenomenological_channel":
-            initial_real_space_state = grf_generator.sample(1).cpu().numpy().squeeze()
-            # For phenomenological channel, input state is normalized wavefunc
-            norm_initial = np.linalg.norm(initial_real_space_state)
-            if norm_initial > 1e-9: initial_real_space_state /= norm_initial
-            else: initial_real_space_state.flat[0]=1.0; initial_real_space_state /= np.linalg.norm(initial_real_space_state)
-
-
-            gamma_b_full_spec_unnorm = get_full_centered_spectrum(initial_real_space_state)
-            gamma_b_full_spec_for_snn_input = normalize_spectrum(gamma_b_full_spec_unnorm) 
-            
-            gamma_a_true_full_spec_for_output = apply_phenomenological_noise_channel(
-                gamma_b_full_spec_for_snn_input, channel_config
-            ) 
+        gamma_b_full_input_spec = None
+        gamma_a_true_full_spec = None 
         
-        elif pde_type == "poisson":
+        if pde_type == "poisson":
             f_sample_grf = grf_generator.sample(1).cpu().numpy().squeeze()
             f_real_with_offset = add_hierarchical_offset_2d(f_sample_grf, sigma=grf_config.get('offset_sigma', 0.5))
             initial_real_space_state_f = f_real_with_offset - np.mean(f_real_with_offset) 
             
-            gamma_b_full_spec_for_snn_input = get_full_centered_spectrum(initial_real_space_state_f) # Unnormalized spectrum of f
+            gamma_b_full_input_spec = get_full_centered_spectrum(initial_real_space_state_f) # Unnormalized spectrum of f
 
             f_hat_r = np.fft.rfft2(initial_real_space_state_f)
             u_hat_r = solve_poisson_2d_rfft(f_hat_r, enforce_zero_mean=True)
             true_output_real_space_state_u = np.fft.irfft2(u_hat_r, s=initial_real_space_state_f.shape) 
+            gamma_a_true_full_spec = get_full_centered_spectrum(true_output_real_space_state_u) # Unnormalized spectrum of u
+        
+        elif pde_type == "step_index_fiber":
+            initial_real_space_state_unnormalized = grf_generator.sample(1).cpu().numpy().squeeze()
+            norm_initial = np.linalg.norm(initial_real_space_state_unnormalized)
+            if norm_initial > 1e-14:
+                initial_real_space_state_psi0 = initial_real_space_state_unnormalized / norm_initial
+            else:
+                initial_real_space_state_psi0 = np.zeros_like(initial_real_space_state_unnormalized)
+                if N_grid_sim_input > 0: 
+                    initial_real_space_state_psi0.flat[0] = 1.0 
+                    initial_real_space_state_psi0 = initial_real_space_state_psi0 / np.linalg.norm(initial_real_space_state_psi0)
+
+            gamma_b_full_spec_unnorm = get_full_centered_spectrum(initial_real_space_state_psi0) 
+            gamma_b_full_input_spec = normalize_spectrum(gamma_b_full_spec_unnorm) 
+
+            potential_V = get_step_index_fiber_potential(N_grid_sim_input, 
+                                                         waveguide_config['L_domain'], 
+                                                         waveguide_config['core_radius_factor'], 
+                                                         waveguide_config['potential_depth'])
+            psi_T_real = solver_main(potential_V, initial_real_space_state_psi0, 
+                                 N_grid=N_grid_sim_input, 
+                                 L_domain=waveguide_config['L_domain'], 
+                                 T_evolution=waveguide_config['evolution_time_T'], 
+                                 num_solver_steps=waveguide_config['solver_num_steps'],
+                                 hbar=waveguide_config['hbar_val'],
+                                 m=waveguide_config['mass_val']) 
             
-            gamma_a_true_full_spec_for_output = get_full_centered_spectrum(true_output_real_space_state_u) # Unnormalized spectrum of u
+            gamma_a_true_full_spec_unnorm = get_full_centered_spectrum(psi_T_real) 
+            gamma_a_true_full_spec = normalize_spectrum(gamma_a_true_full_spec_unnorm) 
         else:
             raise ValueError(f"Unknown pde_type: {pde_type}")
 
-        dataset_gamma_b_full_input.append(gamma_b_full_spec_for_snn_input)
-        dataset_gamma_a_true_full_output.append(gamma_a_true_full_spec_for_output)
+        dataset_gamma_b_full_input.append(gamma_b_full_input_spec)
+        dataset_gamma_a_true_full_output.append(gamma_a_true_full_spec)
         
-        gamma_a_snn_target_spec = extract_center_block(gamma_a_true_full_spec_for_output, K_trunc_snn_output) # Not normalized after truncation
+        gamma_a_snn_target_spec = extract_center_block(gamma_a_true_full_spec, K_trunc_snn_output) 
         dataset_gamma_a_snn_target.append(gamma_a_snn_target_spec)
 
     gamma_b_full_all = np.array(dataset_gamma_b_full_input, dtype=np.complex64)
     gamma_a_snn_target_all = np.array(dataset_gamma_a_snn_target, dtype=np.complex64)
     gamma_a_true_full_all = np.array(dataset_gamma_a_true_full_output, dtype=np.complex64)
     
-    current_save_path = save_path_template.format(Nin=N_grid_sim_input, Nout=K_trunc_snn_output, pde_type=pde_type, noise_str=filename_suffix_str)
+    current_save_path = save_path_template.format(Nin=N_grid_sim_input, Nout=K_trunc_snn_output, pde_type=pde_type, suffix=filename_suffix_str)
     os.makedirs(os.path.dirname(current_save_path) or '.', exist_ok=True)
     np.savez_compressed(current_save_path, 
                         gamma_b_full_input=gamma_b_full_all, 
@@ -263,28 +298,37 @@ def generate_snn_dataset(num_samples, N_grid_sim_input,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Generate dataset (Full Input -> Truncated Output, with Full True Output) for SNN training.")
-    parser.add_argument('--pde_type', type=str, default="phenomenological_channel", choices=["phenomenological_channel", "poisson"])
-    parser.add_argument('--num_samples', type=int, default=1000)
-    parser.add_argument('--n_grid_sim_input', type=int, default=64)
-    parser.add_argument('--k_psi0_limit', type=int, default=12, help="Max k for initial random_low_order_state (phenomenological).")
-    parser.add_argument('--k_trunc_snn_output', type=int, default=32)
-    parser.add_argument('--output_dir', type=str, default="datasets")
-
-    # Phenomenological Channel Noise Parameters
-    parser.add_argument('--apply_attenuation', action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument('--attenuation_loss_factor', type=float, default=0.2)
-    parser.add_argument('--apply_additive_sobolev_noise', action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument('--sobolev_noise_level_base', type=float, default=0.01)
-    parser.add_argument('--sobolev_order_s', type=float, default=1.0)
-    parser.add_argument('--apply_phase_noise', action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument('--phase_noise_std_rad', type=float, default=0.05)
     
-    # GRF parameters (for Poisson source f, AND optionally for phenomenological_channel input)
+    # --- Core Parameters ---
+    parser.add_argument('--pde_type', type=str, default="step_index_fiber", 
+                        choices=["poisson", "step_index_fiber"],
+                        help="Type of data generation process.")
+    parser.add_argument('--num_samples', type=int, default=100) 
+    parser.add_argument('--n_grid_sim_input', type=int, default=64,
+                        help='Grid size for full input & full true output spectra (Nin).')
+    parser.add_argument('--k_trunc_snn_output', type=int, default=32,
+                        help='Truncation for SNN target output spectra (Nout).')
+    parser.add_argument('--output_dir', type=str, default="datasets")
+    parser.add_argument('--k_psi0_limit', type=int, default=12,
+                        help="Max k for GRF base initial state (used if pde_type is step_index_fiber or poisson with GRF).")
+
+    # --- GRF parameters (for Poisson source f, OR for step_index_fiber initial state) ---
     parser.add_argument('--grf_alpha', type=float, default=4.0) 
     parser.add_argument('--grf_tau', type=float, default=1.0)   
-    parser.add_argument('--grf_offset_sigma', type=float, default=0.5, help="Sigma for hierarchical offset in Poisson source.")
-    parser.add_argument('--use_grf_for_phenom_input', action=argparse.BooleanOptionalAction, default=True, # New flag
-                        help="If pde_type is phenomenological_channel, use GRF for initial state instead of random_low_order_state.")
+    parser.add_argument('--grf_offset_sigma', type=float, default=0.5, 
+                        help="Sigma for hierarchical offset in Poisson source (f term).")
+
+    # --- Step-Index Fiber Waveguide Parameters ---
+    parser.add_argument('--L_domain', type=float, default=2*np.pi, 
+                        help="Physical domain size (e.g., 2pi for periodicity).")
+    parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2, 
+                        help="Core radius as fraction of L_domain/2.")
+    parser.add_argument('--fiber_potential_depth', type=float, default=1.0, 
+                        help="Depth V0 of the fiber potential well.")
+    parser.add_argument('--evolution_time_T', type=float, default=0.1) 
+    parser.add_argument('--solver_num_steps', type=int, default=50) 
+    parser.add_argument('--hbar_val', type=float, default=HBAR_CONST) 
+    parser.add_argument('--mass_val', type=float, default=MASS_CONST) 
 
     args = parser.parse_args()
 
@@ -292,40 +336,38 @@ if __name__ == '__main__':
         raise ValueError("K_TRUNC_SNN_OUTPUT cannot be larger than N_GRID_SIM_INPUT.")
 
     filename_suffix = ""
-    if args.pde_type == "phenomenological_channel":
-        noise_parts = []
-        if args.use_grf_for_phenom_input: # Add GRF info to suffix if used for phenom. channel
-            noise_parts.append(f"grfInA{args.grf_alpha:.1f}T{args.grf_tau:.1f}")
-        if args.apply_attenuation: noise_parts.append(f"att{args.attenuation_loss_factor:.2f}")
-        if args.apply_additive_sobolev_noise: noise_parts.append(f"sob{args.sobolev_noise_level_base:.3f}s{args.sobolev_order_s:.1f}")
-        if args.apply_phase_noise: noise_parts.append(f"ph{args.phase_noise_std_rad:.2f}")
-        filename_suffix = "_".join(noise_parts) if noise_parts else "no_noise_or_grf_input"
-    elif args.pde_type == "poisson":
-        filename_suffix = f"poisson_grfA{args.grf_alpha:.1f}T{args.grf_tau:.1f}"
+    if args.pde_type == "poisson":
+        filename_suffix = f"poisson_grfA{args.grf_alpha:.1f}T{args.grf_tau:.1f}OffS{args.grf_offset_sigma:.1f}"
+    elif args.pde_type == "step_index_fiber":
+        filename_suffix = (f"fiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+                           f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
+                           f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
     
     print(f"--- Dataset Generation: PDE Type '{args.pde_type}' (Full Input -> Truncated Output, with Full True Output) ---")
     print(f"Filename suffix: {filename_suffix}")
 
-    channel_config_for_phenom = {
-        'apply_attenuation': args.apply_attenuation, 'attenuation_loss_factor': args.attenuation_loss_factor,
-        'apply_additive_sobolev_noise': args.apply_additive_sobolev_noise, 
-        'sobolev_noise_level_base': args.sobolev_noise_level_base, 'sobolev_order_s': args.sobolev_order_s,
-        'apply_phase_noise': args.apply_phase_noise, 'phase_noise_std_rad': args.phase_noise_std_rad
-    }
-    grf_config_for_pde = { # Renamed for clarity, used by both Poisson and optionally by Phenom.
+    grf_config_for_input = { 
         'alpha': args.grf_alpha, 'tau': args.grf_tau, 
-        'offset_sigma': args.grf_offset_sigma,
-        'use_grf_for_phenom_input': args.use_grf_for_phenom_input # Pass this flag
+        'offset_sigma': args.grf_offset_sigma 
+    }
+    waveguide_config_params = { 
+        'L_domain': args.L_domain, 
+        'core_radius_factor': args.fiber_core_radius_factor, 
+        'potential_depth': args.fiber_potential_depth, 
+        'evolution_time_T': args.evolution_time_T, 
+        'solver_num_steps': args.solver_num_steps, 
+        'hbar_val': args.hbar_val, 
+        'mass_val': args.mass_val
     }
     
-    filename_template = os.path.join(args.output_dir, "dataset_{pde_type}_Nin{Nin}_Nout{Nout}_{noise_str}.npz")
+    filename_template = os.path.join(args.output_dir, "dataset_{pde_type}_Nin{Nin}_Nout{Nout}_{suffix}.npz")
 
     gamma_b_data, gamma_a_snn_target_data, gamma_a_true_full_data = generate_snn_dataset(
         args.num_samples, args.n_grid_sim_input, args.k_psi0_limit,
         args.k_trunc_snn_output, 
         args.pde_type,
-        channel_config_for_phenom, 
-        grf_config_for_pde, # Pass the GRF config
+        grf_config_for_input, 
+        waveguide_config_params,
         save_path_template=filename_template,
         filename_suffix_str=filename_suffix
     )
@@ -336,43 +378,56 @@ if __name__ == '__main__':
         ga_snn_target_sample_spec = gamma_a_snn_target_data[sample_idx]
         ga_true_full_sample_spec = gamma_a_true_full_data[sample_idx]
 
+        # --- Spectral Domain Visualization ---
         fig_spec, axes_spec = plt.subplots(1, 3, figsize=(18, 5)) 
         im0_spec = axes_spec[0].imshow(np.abs(gb_full_sample_spec))
         axes_spec[0].set_title(f"Input $\gamma_b$ Spectrum ($N_{{in}}={args.n_grid_sim_input}$)")
         plt.colorbar(im0_spec, ax=axes_spec[0])
+        
         im1_spec = axes_spec[1].imshow(np.abs(ga_snn_target_sample_spec))
         axes_spec[1].set_title(f"Target $\gamma_a$ Spectrum ($N_{{out}}={args.k_trunc_snn_output}$)")
         plt.colorbar(im1_spec, ax=axes_spec[1])
+
         im2_spec = axes_spec[2].imshow(np.abs(ga_true_full_sample_spec))
         axes_spec[2].set_title(f"True Full $\gamma_a$ Spectrum ($N_{{in}}={args.n_grid_sim_input}$)")
         plt.colorbar(im2_spec, ax=axes_spec[2])
+
         fig_spec.suptitle(f"Dataset Sample Spectra (PDE: {args.pde_type.upper()}, Params: {filename_suffix})", fontsize=14)
         plt.tight_layout(rect=[0,0,1,0.93])
-        vis_dir = "results_dataset_gen_snn_format_v3" 
+        vis_dir = "results_dataset_gen_pde_v3" 
         os.makedirs(vis_dir, exist_ok=True)
         save_fig_path_spec = os.path.join(vis_dir, f"sample_snn_spectra_v3_{args.pde_type}_{filename_suffix}.png")
         plt.savefig(save_fig_path_spec)
         print(f"\nSample SNN spectra visualization saved to {save_fig_path_spec}")
         plt.close(fig_spec) 
 
+        # --- Spatial Domain Visualization ---
         psi_b_real_vis = np.fft.ifft2(np.fft.ifftshift(gb_full_sample_spec))
         psi_a_true_full_spatial_vis = np.fft.ifft2(np.fft.ifftshift(ga_true_full_sample_spec))
+        
         padded_target_spec = np.zeros((args.n_grid_sim_input, args.n_grid_sim_input), dtype=np.complex64)
         start_idx = args.n_grid_sim_input // 2 - args.k_trunc_snn_output // 2
         end_idx = start_idx + args.k_trunc_snn_output
         padded_target_spec[start_idx:end_idx, start_idx:end_idx] = ga_snn_target_sample_spec
         psi_a_snn_target_spatial_vis = np.fft.ifft2(np.fft.ifftshift(padded_target_spec))
+
         fig_spatial, axes_spatial = plt.subplots(1, 3, figsize=(18, 5))
-        plot_func = np.abs if args.pde_type == "phenomenological_channel" else lambda x: x.real
-        im0_spatial = axes_spatial[0].imshow(plot_func(psi_b_real_vis))
+        plot_func_input = lambda x: x.real if args.pde_type == "poisson" else np.abs(x)
+        plot_func_output = lambda x: x.real if args.pde_type == "poisson" else np.abs(x)
+        
+        # Explicitly cast to float for imshow
+        im0_spatial = axes_spatial[0].imshow(np.abs(psi_b_real_vis))
         axes_spatial[0].set_title(f"Input $\gamma_b$ Spatial ($N_{{in}}={args.n_grid_sim_input}$)")
         plt.colorbar(im0_spatial, ax=axes_spatial[0])
-        im1_spatial = axes_spatial[1].imshow(plot_func(psi_a_snn_target_spatial_vis))
+
+        im1_spatial = axes_spatial[1].imshow(np.asarray(np.abs(psi_a_snn_target_spatial_vis)))
         axes_spatial[1].set_title(f"SNN Target $\gamma_a$ Spatial (from $N_{{out}}$)")
         plt.colorbar(im1_spatial, ax=axes_spatial[1])
-        im2_spatial = axes_spatial[2].imshow(plot_func(psi_a_true_full_spatial_vis))
+
+        im2_spatial = axes_spatial[2].imshow(np.asarray(np.abs(psi_a_true_full_spatial_vis)))
         axes_spatial[2].set_title(f"True Full $\gamma_a$ Spatial ($N_{{in}}={args.n_grid_sim_input}$)")
         plt.colorbar(im2_spatial, ax=axes_spatial[2])
+
         fig_spatial.suptitle(f"Dataset Sample Spatial (PDE: {args.pde_type.upper()}, Params: {filename_suffix})", fontsize=14)
         plt.tight_layout(rect=[0,0,1,0.93])
         save_fig_path_spatial = os.path.join(vis_dir, f"sample_snn_spatial_v3_{args.pde_type}_{filename_suffix}.png")
@@ -381,4 +436,3 @@ if __name__ == '__main__':
         plt.close(fig_spatial)
     else:
         print("No samples generated or data is empty, skipping visualization.")
-

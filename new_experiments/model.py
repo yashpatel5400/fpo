@@ -64,11 +64,6 @@ def channels_to_spectrum_complex_torch(channels_mat_real_imag):
 
 class SNNFullInputDataset(Dataset):
     def __init__(self, gamma_b_full_spectra, gamma_a_truncated_target_spectra):
-        """
-        Args:
-            gamma_b_full_spectra (np.array): Full input spectra, shape (num_samples, N_in, N_in), complex.
-            gamma_a_truncated_target_spectra (np.array): Target spectra, shape (num_samples, K_out, K_out), complex.
-        """
         if gamma_b_full_spectra.shape[0] != gamma_a_truncated_target_spectra.shape[0]:
             raise ValueError("Input and target arrays must have the same number of samples.")
         
@@ -201,9 +196,9 @@ def train_snn_model(model,
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Train Spectral Neural Operator (Full Input -> Truncated Output for Loss).")
     
-    # PDE Type and Dataset Parameters
-    parser.add_argument('--pde_type', type=str, default="phenomenological_channel", 
-                        choices=["phenomenological_channel", "poisson"],
+    # --- PDE Type and Dataset Parameters ---
+    parser.add_argument('--pde_type', type=str, default="step_index_fiber", 
+                        choices=["poisson", "step_index_fiber"],
                         help="Type of data generation process the dataset corresponds to.")
     parser.add_argument('--n_grid_sim_input_ds', type=int, default=64, 
                         help='Nin: Resolution of gamma_b_full_input in dataset. SNN will take this as input resolution.')
@@ -212,38 +207,32 @@ if __name__ == '__main__':
     parser.add_argument('--dataset_dir', type=str, default="datasets",
                         help="Directory of the .npz dataset.")
 
-    # SNN Architecture Parameters
+    # --- SNN Architecture Parameters ---
     parser.add_argument('--snn_hidden_channels', type=int, default=64)
     parser.add_argument('--snn_num_hidden_layers', type=int, default=3)
     
-    # Training Hyperparameters
+    # --- Training Hyperparameters ---
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--val_split', type=float, default=0.2)
     
-    # Output Directories
+    # --- Output Directories ---
     parser.add_argument('--model_save_dir', type=str, default="trained_snn_models")
     parser.add_argument('--plot_save_dir', type=str, default="results_snn_training")
 
-    # Noise/Source Parameters (for constructing correct filenames)
-    # Phenomenological Channel
-    parser.add_argument('--use_grf_for_phenom_input', action=argparse.BooleanOptionalAction, default=True,
-                        help="If pde_type is phenomenological_channel, use GRF for initial state.")
-    parser.add_argument('--apply_attenuation', action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument('--attenuation_loss_factor', type=float, default=0.2)
-    
-    parser.add_argument('--apply_additive_sobolev_noise', action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument('--sobolev_noise_level_base', type=float, default=0.01) 
-    parser.add_argument('--sobolev_order_s', type=float, default=1.0)
-    
-    parser.add_argument('--apply_phase_noise', action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument('--phase_noise_std_rad', type=float, default=0.05) 
-    
-    # Poisson Source (GRF parameters) - also used if use_grf_for_phenom_input is True
-    parser.add_argument('--grf_alpha', type=float, default=4.0)
-    parser.add_argument('--grf_tau', type=float, default=1.0)
-    parser.add_argument('--grf_offset_sigma', type=float, default=0.5, help="Sigma for hierarchical offset in Poisson source.")
+    # --- Parameters for Filename Construction (must match data_gen_script) ---
+    # GRF parameters (used for Poisson source f, OR for step_index_fiber initial state)
+    parser.add_argument('--grf_alpha', type=float, default=4.0) 
+    parser.add_argument('--grf_tau', type=float, default=1.0)   
+    parser.add_argument('--grf_offset_sigma', type=float, default=0.5, 
+                        help="Sigma for hierarchical offset in Poisson source (f term).")
+    # Step-Index Fiber Waveguide Parameters
+    parser.add_argument('--L_domain', type=float, default=2*np.pi) # Not in filename, but data gen uses it
+    parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
+    parser.add_argument('--fiber_potential_depth', type=float, default=1.0)
+    parser.add_argument('--evolution_time_T', type=float, default=0.1) 
+    parser.add_argument('--solver_num_steps', type=int, default=50) 
     
     args = parser.parse_args()
     
@@ -252,19 +241,12 @@ if __name__ == '__main__':
     os.makedirs(args.plot_save_dir, exist_ok=True)
 
     filename_suffix = ""
-    if args.pde_type == "phenomenological_channel":
-        noise_parts = []
-        if args.use_grf_for_phenom_input:
-            noise_parts.append(f"grfInA{args.grf_alpha:.1f}T{args.grf_tau:.1f}")
-        if args.apply_attenuation:
-            noise_parts.append(f"att{args.attenuation_loss_factor:.2f}")
-        if args.apply_additive_sobolev_noise:
-            noise_parts.append(f"sob{args.sobolev_noise_level_base:.3f}s{args.sobolev_order_s:.1f}")
-        if args.apply_phase_noise:
-            noise_parts.append(f"ph{args.phase_noise_std_rad:.2f}")
-        filename_suffix = "_".join(noise_parts) if noise_parts else "no_noise_or_grf_input"
-    elif args.pde_type == "poisson":
-        filename_suffix = f"poisson_grfA{args.grf_alpha:.1f}T{args.grf_tau:.1f}"
+    if args.pde_type == "poisson":
+        filename_suffix = f"poisson_grfA{args.grf_alpha:.1f}T{args.grf_tau:.1f}OffS{args.grf_offset_sigma:.1f}"
+    elif args.pde_type == "step_index_fiber":
+        filename_suffix = (f"fiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+                           f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
+                           f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
     
     DATASET_FILENAME = f"dataset_{args.pde_type}_Nin{args.n_grid_sim_input_ds}_Nout{args.k_snn_target_res}_{filename_suffix}.npz"
     DATASET_FILE_PATH = os.path.join(args.dataset_dir, DATASET_FILENAME)

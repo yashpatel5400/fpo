@@ -10,7 +10,7 @@ import time # For adding small delay to print statements
 def run_script(script_name, args_list, log_prefix=""):
     """Helper function to run a python script with arguments."""
     command = ["python", script_name] + args_list
-    max_print_len = 200 # Limit length of printed command
+    max_print_len = 250 # Limit length of printed command
     command_str = ' '.join(command)
     # if len(command_str) > max_print_len:
     #     command_str = command_str[:max_print_len-3] + "..."
@@ -18,9 +18,11 @@ def run_script(script_name, args_list, log_prefix=""):
     try:
         process = subprocess.run(command, check=True, capture_output=True, text=True, timeout=7200) 
         if process.stderr:
+            # Filter out common non-error warnings if desired, or print all stderr
+            # For now, print if it seems like an error or warning
             if "error" in process.stderr.lower() or \
                "traceback" in process.stderr.lower() or \
-               "warning" in process.stderr.lower(): # Catch warnings too
+               "warning" in process.stderr.lower():
                 print(f"{log_prefix}Stderr from {script_name} (first 500 chars):")
                 print(process.stderr[:])
         return True
@@ -46,45 +48,52 @@ def run_script(script_name, args_list, log_prefix=""):
 def run_single_calibration_pipeline(params_tuple):
     """
     Worker function for multiprocessing. Runs the full pipeline for one config.
+    params_tuple = (k_snn_output_res, k_bound, args_namespace_obj_for_worker, 
+                    filename_suffix_for_run_arg, data_gen_script_name, 
+                    snn_train_script_name, conformal_calib_script_name,
+                    exp_idx, total_exps_for_current_outer_loop)
     """
-    k_snn_output_res, k_bound, args_namespace_obj, filename_suffix_for_run_arg, \
+    k_snn_output_res, k_bound, args_worker, filename_suffix_for_run_arg, \
     data_gen_script, snn_train_script, conformal_calib_script, \
     exp_idx, total_exps_for_current_config_set = params_tuple
     
-    args = argparse.Namespace(**vars(args_namespace_obj)) 
-    args.grf_alpha = args_namespace_obj.grf_alpha 
-
+    # args_worker is already a distinct Namespace object for this worker call
+    
     time.sleep(np.random.uniform(0, 0.1)) 
-    log_prefix = f"[Worker {os.getpid()} Exp {exp_idx+1}/{total_exps_for_current_config_set} for GRF_alpha={args.grf_alpha:.1f}, K_SNN_Out={k_snn_output_res}, K_Bound={k_bound}] "
+    log_prefix = f"[Worker {os.getpid()} Exp {exp_idx+1}/{total_exps_for_current_config_set} for GRF_alpha={args_worker.grf_alpha:.1f}, K_SNN_Out={k_snn_output_res}, K_Bound={k_bound}] "
     print(f"{log_prefix}Processing...")
 
-    dataset_filename = f"dataset_{args.pde_type}_Nin{args.n_grid_sim_input_ds}_Nout{k_snn_output_res}_{filename_suffix_for_run_arg}.npz"
-    dataset_full_path = os.path.join(args.dataset_dir, dataset_filename)
+    # --- Filename and Path Construction using filename_suffix_for_run_arg ---
+    # This suffix already includes PDE type and its specific parameters (like GRF alpha if applicable)
+    dataset_filename = f"dataset_{args_worker.pde_type}_Nin{args_worker.n_grid_sim_input_ds}_Nout{k_snn_output_res}_{filename_suffix_for_run_arg}.npz"
+    dataset_full_path = os.path.join(args_worker.dataset_dir, dataset_filename)
 
-    snn_model_filename = f"snn_PDE{args.pde_type}_Kin{args.n_grid_sim_input_ds}_Kout{k_snn_output_res}_H{args.snn_hidden_channels}_L{args.snn_num_hidden_layers}_{filename_suffix_for_run_arg}.pth"
-    snn_model_full_path = os.path.join(args.model_dir, snn_model_filename)
+    snn_model_filename = f"snn_PDE{args_worker.pde_type}_Kin{args_worker.n_grid_sim_input_ds}_Kout{k_snn_output_res}_H{args_worker.snn_hidden_channels}_L{args_worker.snn_num_hidden_layers}_{filename_suffix_for_run_arg}.pth"
+    snn_model_full_path = os.path.join(args_worker.model_dir, snn_model_filename)
     
-    snn_training_plot_dir = os.path.join(args.results_dir_sweep_plots, f"snn_training_PDE{args.pde_type}_Kin{args.n_grid_sim_input_ds}_Kout{k_snn_output_res}_{filename_suffix_for_run_arg}")
+    snn_training_plot_dir = os.path.join(args_worker.results_dir_sweep_plots, f"snn_training_PDE{args_worker.pde_type}_Kin{args_worker.n_grid_sim_input_ds}_Kout{k_snn_output_res}_{filename_suffix_for_run_arg}")
 
-    calib_results_subdir_name = (f"PDE{args.pde_type}_Nin{args.n_grid_sim_input_ds}_SNNres{k_snn_output_res}_"
-                                 f"KfullThm{args.n_grid_sim_input_ds}_KboundB{k_bound}_s{args.theorem_s}_nu{args.theorem_nu}_{filename_suffix_for_run_arg}")
-    calib_results_subdir = os.path.join(args.results_dir_calib_base, calib_results_subdir_name)
+    calib_results_subdir_name = (f"PDE{args_worker.pde_type}_Nin{args_worker.n_grid_sim_input_ds}_SNNout{k_snn_output_res}_"
+                                 f"KfullThm{args_worker.n_grid_sim_input_ds}_KboundB{k_bound}_s{args_worker.theorem_s}_nu{args_worker.theorem_nu}_{filename_suffix_for_run_arg}")
+    calib_results_subdir = os.path.join(args_worker.results_dir_calib_base, calib_results_subdir_name)
     
     coverage_data_filename_npz = os.path.join(
         calib_results_subdir, 
-        f"coverage_data_PDE{args.pde_type}_thm_s{args.theorem_s}_nu{args.theorem_nu}_d{args.theorem_d}"
-        f"_Nin{args.n_grid_sim_input_ds}_SNNout{k_snn_output_res}_NfullThm{args.n_grid_sim_input_ds}_KboundB{k_bound}"
+        f"coverage_data_PDE{args_worker.pde_type}_thm_s{args_worker.theorem_s}_nu{args_worker.theorem_nu}_d{args_worker.theorem_d}"
+        f"_Nin{args_worker.n_grid_sim_input_ds}_SNNout{k_snn_output_res}_NfullThm{args_worker.n_grid_sim_input_ds}_KboundB{k_bound}"
         f"_{filename_suffix_for_run_arg}.npz"
     )
 
-    if not args.skip_data_gen or not os.path.exists(dataset_full_path):
+    # --- 1. Generate Data (if not skipped) ---
+    # The args_worker.base_sub_script_args_for_current_pde already contains PDE type and its specific params
+    if not args_worker.skip_data_gen or not os.path.exists(dataset_full_path):
         print(f"{log_prefix}Generating dataset: {dataset_filename}...")
-        data_gen_args_list = args.base_sub_script_args_for_current_pde + [
-            "--num_samples", str(args.num_samples_dataset), 
-            "--n_grid_sim_input", str(args.n_grid_sim_input_ds), 
-            "--k_psi0_limit", str(args.k_psi0_limit_dataset), 
+        data_gen_args_list = args_worker.base_sub_script_args_for_current_pde + [
+            "--num_samples", str(args_worker.num_samples_dataset), 
+            "--n_grid_sim_input", str(args_worker.n_grid_sim_input_ds), 
+            "--k_psi0_limit", str(args_worker.k_psi0_limit_dataset), 
             "--k_trunc_snn_output", str(k_snn_output_res), 
-            "--output_dir", args.dataset_dir
+            "--output_dir", args_worker.dataset_dir
         ]
         if not run_script(data_gen_script, data_gen_args_list, log_prefix):
             print(f"{log_prefix}Data generation FAILED for {dataset_filename}. Returning None.")
@@ -92,18 +101,19 @@ def run_single_calibration_pipeline(params_tuple):
     else:
         print(f"{log_prefix}Skipping data generation, dataset found: {dataset_full_path}")
 
-    if not args.skip_snn_train or not os.path.exists(snn_model_full_path):
+    # --- 2. Train SNN Model (if not skipped) ---
+    if not args_worker.skip_snn_train or not os.path.exists(snn_model_full_path):
         print(f"{log_prefix}Training SNN: {snn_model_filename}...")
         os.makedirs(snn_training_plot_dir, exist_ok=True)
-        train_args_list = args.base_sub_script_args_for_current_pde + [
-            "--n_grid_sim_input_ds", str(args.n_grid_sim_input_ds), 
+        train_args_list = args_worker.base_sub_script_args_for_current_pde + [
+            "--n_grid_sim_input_ds", str(args_worker.n_grid_sim_input_ds), 
             "--k_snn_target_res", str(k_snn_output_res),          
-            "--dataset_dir", args.dataset_dir, 
-            "--model_save_dir", args.model_dir,
+            "--dataset_dir", args_worker.dataset_dir, 
+            "--model_save_dir", args_worker.model_dir,
             "--plot_save_dir", snn_training_plot_dir, 
-            "--snn_hidden_channels", str(args.snn_hidden_channels),
-            "--snn_num_hidden_layers", str(args.snn_num_hidden_layers), 
-            "--epochs", str(args.snn_epochs),
+            "--snn_hidden_channels", str(args_worker.snn_hidden_channels),
+            "--snn_num_hidden_layers", str(args_worker.snn_num_hidden_layers), 
+            "--epochs", str(args_worker.snn_epochs),
         ]
         if not run_script(snn_train_script, train_args_list, log_prefix):
             print(f"{log_prefix}SNN training FAILED for {snn_model_filename}. Returning None.")
@@ -111,19 +121,20 @@ def run_single_calibration_pipeline(params_tuple):
     else:
         print(f"{log_prefix}Skipping SNN training, model found: {snn_model_full_path}")
             
+    # --- 3. Run Conformal Calibration ---
     os.makedirs(calib_results_subdir, exist_ok=True)
-    calib_args_list = args.base_sub_script_args_for_current_pde + [
-        "--n_grid_sim_input_ds", str(args.n_grid_sim_input_ds), 
-        "--k_snn_output_res", str(k_snn_output_res), 
-        "--snn_model_dir", args.model_dir, 
-        "--snn_hidden_channels", str(args.snn_hidden_channels), 
-        "--snn_num_hidden_layers", str(args.snn_num_hidden_layers),
+    calib_args_list = args_worker.base_sub_script_args_for_current_pde + [
+        "--n_grid_sim_input_ds", str(args_worker.n_grid_sim_input_ds), 
+        "--snn_output_res", str(k_snn_output_res), 
+        "--snn_model_dir", args_worker.model_dir, 
+        "--snn_hidden_channels", str(args_worker.snn_hidden_channels), 
+        "--snn_num_hidden_layers", str(args_worker.snn_num_hidden_layers),
         "--snn_model_filename_override", snn_model_filename, 
-        "--dataset_dir", args.dataset_dir, 
+        "--dataset_dir", args_worker.dataset_dir, 
         "--results_dir", calib_results_subdir, 
-        "--s_theorem", str(args.theorem_s), 
-        "--nu_theorem", str(args.theorem_nu),
-        "--d_dimensions", str(args.theorem_d), 
+        "--s_theorem", str(args_worker.theorem_s), 
+        "--nu_theorem", str(args_worker.theorem_nu),
+        "--d_dimensions", str(args_worker.theorem_d), 
         "--k_trunc_bound", str(k_bound), 
         "--no_plot" 
     ]
@@ -133,14 +144,15 @@ def run_single_calibration_pipeline(params_tuple):
     
     try:
         coverage_data = np.load(coverage_data_filename_npz)
-        result_key = (k_snn_output_res, k_bound, args.pde_type, args.grf_alpha, filename_suffix_for_run_arg)
+        # Key includes k_snn_output_res, k_bound, pde_type, current_grf_alpha (from args_worker), and the full filename_suffix_for_run_arg
+        result_key = (k_snn_output_res, k_bound, args_worker.pde_type, args_worker.grf_alpha, filename_suffix_for_run_arg)
         print(f"{log_prefix}Successfully processed results for key: {result_key}")
         return result_key, { 
             "nominal_coverages": coverage_data["nominal_coverages"],
             "empirical_coverages_theorem": coverage_data["empirical_coverages_theorem"]
         }
     except Exception as e:
-        print(f"{log_prefix}Error loading coverage data for K_SNN_IO={k_snn_output_res}, K_BOUND={k_bound} from {coverage_data_filename_npz}: {e}")
+        print(f"{log_prefix}Error loading coverage data for SNN_Output_Res={k_snn_output_res}, K_BOUND={k_bound} from {coverage_data_filename_npz}: {e}")
         return None
 
 
@@ -149,7 +161,7 @@ if __name__ == '__main__':
     
     # --- PDE Type ---
     parser.add_argument('--pde_type', type=str, default="poisson", 
-                        choices=["phenomenological_channel", "poisson"],
+                        choices=["phenomenological_channel", "poisson", "step_index_fiber"],
                         help="Type of data generation process for the dataset.")
     
     # --- Sweep Parameters ---
@@ -192,6 +204,13 @@ if __name__ == '__main__':
     # --- GRF Parameters (used for Poisson, and for phenom. if use_grf_for_phenom_input) ---
     parser.add_argument('--grf_tau', type=float, default=1.0)   
     parser.add_argument('--grf_offset_sigma', type=float, default=0.5)
+
+    # --- Step-Index Fiber Parameters (if pde_type is step_index_fiber) ---
+    parser.add_argument('--L_domain', type=float, default=2*np.pi)
+    parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
+    parser.add_argument('--fiber_potential_depth', type=float, default=1.0)
+    parser.add_argument('--evolution_time_T', type=float, default=0.1) 
+    parser.add_argument('--solver_num_steps', type=int, default=50) 
 
     # --- Directories and Control Flags ---
     parser.add_argument('--dataset_dir', type=str, default="datasets_sweep_grf_alpha")
@@ -254,13 +273,27 @@ if __name__ == '__main__':
                 "--phase_noise_std_rad", str(current_iter_args.phase_noise_std_rad)
             ])
         elif current_iter_args.pde_type == "poisson":
-            current_filename_suffix = f"poisson_grfA{current_iter_args.grf_alpha:.1f}T{current_iter_args.grf_tau:.1f}"
+            current_filename_suffix = f"poisson_grfA{current_iter_args.grf_alpha:.1f}T{current_iter_args.grf_tau:.1f}OffS{current_iter_args.grf_offset_sigma:.1f}"
             current_base_sub_script_args.extend([
                 "--grf_alpha", str(current_iter_args.grf_alpha), 
                 "--grf_tau", str(current_iter_args.grf_tau), 
                 "--grf_offset_sigma", str(current_iter_args.grf_offset_sigma)
             ])
-        
+        elif current_iter_args.pde_type == "step_index_fiber":
+             current_filename_suffix = (f"fiber_GRFinA{current_iter_args.grf_alpha:.1f}T{current_iter_args.grf_tau:.1f}_"
+                               f"coreR{current_iter_args.fiber_core_radius_factor:.1f}_V{current_iter_args.fiber_potential_depth:.1f}_"
+                               f"evoT{current_iter_args.evolution_time_T:.1e}_steps{current_iter_args.solver_num_steps}")
+             current_base_sub_script_args.extend([
+                "--L_domain", str(current_iter_args.L_domain),
+                "--fiber_core_radius_factor", str(current_iter_args.fiber_core_radius_factor),
+                "--fiber_potential_depth", str(current_iter_args.fiber_potential_depth),
+                "--evolution_time_T", str(current_iter_args.evolution_time_T),
+                "--solver_num_steps", str(current_iter_args.solver_num_steps),
+                # Assuming hbar and mass are fixed or part of main args not specific to PDE type for filename
+                "--grf_alpha", str(current_iter_args.grf_alpha), # If GRF is used for initial state
+                "--grf_tau", str(current_iter_args.grf_tau)
+             ])
+
         current_iter_args.filename_suffix_for_this_run = current_filename_suffix 
         current_iter_args.base_sub_script_args_for_current_pde = current_base_sub_script_args
         
@@ -284,6 +317,16 @@ if __name__ == '__main__':
                     "--k_trunc_snn_output", str(k_snn_io_res_current), 
                     "--output_dir", current_iter_args.dataset_dir
                 ]
+                # Add fiber params if pde_type is step_index_fiber for data_gen
+                if current_iter_args.pde_type == "step_index_fiber":
+                    data_gen_args_list.extend([
+                        "--L_domain", str(current_iter_args.L_domain),
+                        "--fiber_core_radius_factor", str(current_iter_args.fiber_core_radius_factor),
+                        "--fiber_potential_depth", str(current_iter_args.fiber_potential_depth),
+                        "--evolution_time_T", str(current_iter_args.evolution_time_T),
+                        "--solver_num_steps", str(current_iter_args.solver_num_steps)
+                    ])
+
                 if not run_script(data_gen_script_name, data_gen_args_list, f"      [GRF_A={current_grf_alpha_sweep_val:.1f}, K_SNN_Out={k_snn_io_res_current}] "):
                     continue
             else:
@@ -309,12 +352,11 @@ if __name__ == '__main__':
 
             calibration_tasks_for_this_set = []
             for i_calib_task, k_bound_current_val in enumerate(current_iter_args.k_trunc_bound_values):
-                # CORRECTED TUPLE: Added missing script names
                 calibration_tasks_for_this_set.append(
                     (k_snn_io_res_current, k_bound_current_val, current_iter_args, 
                      current_iter_args.filename_suffix_for_this_run, 
-                     data_gen_script_name,  # Added
-                     snn_train_script_name, # Added
+                     data_gen_script_name, 
+                     snn_train_script_name, 
                      conformal_calib_script_name,
                      i_calib_task, len(current_iter_args.k_trunc_bound_values))
                 )
@@ -339,162 +381,134 @@ if __name__ == '__main__':
     if not all_sweep_results_dict:
         print("No results to plot.")
     else:
-        # Determine primary sweep variable for plotting based on which list has more than one unique value
-        plot_sweep_var_is_grf_alpha = len(set(args.grf_alpha_values)) > 1 and len(set(args.k_trunc_bound_values)) == 1
-        plot_sweep_var_is_k_bound = len(set(args.k_trunc_bound_values)) > 1 and len(set(args.grf_alpha_values)) == 1
-        plot_both_sweeping = len(set(args.grf_alpha_values)) > 1 and len(set(args.k_trunc_bound_values)) > 1
-        
-        if plot_sweep_var_is_grf_alpha or plot_sweep_var_is_k_bound or (not plot_both_sweeping and (len(set(args.grf_alpha_values)) >=1 and len(set(args.k_trunc_bound_values)) >=1 ) ): # Single figure with subplots
-            
-            primary_sweep_values_plot = []
-            subplot_var_label_plot = ""
-            figure_title_fixed_var_plot = ""
-            plot_filename_tag_plot = ""
+        # Determine the structure of the plot based on what was swept with multiple values
+        swept_grf_alphas = sorted(list(set(args.grf_alpha_values)))
+        swept_k_bounds = sorted(list(set(args.k_trunc_bound_values)))
 
-            if plot_sweep_var_is_grf_alpha:
-                primary_sweep_values_plot = sorted(list(set(args.grf_alpha_values)))
-                subplot_var_label_plot = "GRF $\\alpha$"
-                figure_title_fixed_var_plot = f"$k_{{bound}}={args.k_trunc_bound_values[0]}$"
-                plot_filename_tag_plot = f"vs_GRFalpha_Kbound{args.k_trunc_bound_values[0]}"
-            elif plot_sweep_var_is_k_bound:
-                primary_sweep_values_plot = sorted(list(set(args.k_trunc_bound_values)))
-                subplot_var_label_plot = "$k_{bound}$"
-                figure_title_fixed_var_plot = f"GRF $\\alpha={args.grf_alpha_values[0]:.1f}$"
-                plot_filename_tag_plot = f"vs_Kbound_GRFalpha{args.grf_alpha_values[0]:.1f}"
-            else: # Both have length 1, or neither is explicitly a sweep for subplots
-                primary_sweep_values_plot = [args.k_trunc_bound_values[0]] # Default to k_bound as primary for structure
-                subplot_var_label_plot = "$k_{bound}$"
-                figure_title_fixed_var_plot = f"GRF $\\alpha={args.grf_alpha_values[0]:.1f}$"
-                plot_filename_tag_plot = f"single_GRFalpha{args.grf_alpha_values[0]:.1f}_Kbound{args.k_trunc_bound_values[0]}"
+        # Plotting logic based on whether grf_alpha or k_trunc_bound is the primary sweep for subplots in a figure
+        # If both are lists of length > 1, create one figure per grf_alpha, with subplots for k_trunc_bound.
+        # If only one is a list of length > 1, that one defines the subplots in a single figure.
+        # If both are length 1, a single plot is generated.
 
-            num_subplots_plot = len(primary_sweep_values_plot)
-            if num_subplots_plot == 0:
-                print("No primary sweep values to plot.")
-            else:
-                ncols_fig = num_subplots_plot if num_subplots_plot <= 4 else int(np.ceil(np.sqrt(num_subplots_plot))) # Max 4 cols for readability
-                nrows_fig = 1 if num_subplots_plot <= 4 else int(np.ceil(num_subplots_plot / ncols_fig))
-                if nrows_fig == 0: nrows_fig = 1
-                if ncols_fig == 0: ncols_fig = 1
-
-                fig, axes = plt.subplots(nrows_fig, ncols_fig, 
-                                         figsize=(ncols_fig * 6, nrows_fig * 5.5), 
-                                         sharex=True, sharey=True, squeeze=False)
-                axes_flat = axes.flatten()
-
-                for i_plot, current_primary_val in enumerate(primary_sweep_values_plot):
-                    ax = axes_flat[i_plot]
-                    ax.plot([0, 1], [0, 1], linestyle='--', color='gray', label='Ideal Coverage')
-                    
-                    # Determine the fixed secondary value and the suffix for this plot
-                    current_grf_alpha_for_key = current_primary_val if plot_sweep_var_is_grf_alpha else args.grf_alpha_values[0]
-                    current_k_bound_for_key = current_primary_val if plot_sweep_var_is_k_bound else args.k_trunc_bound_values[0]
-                    if not plot_sweep_var_is_grf_alpha and not plot_sweep_var_is_k_bound: # Single config plot
-                        current_grf_alpha_for_key = args.grf_alpha_values[0]
-                        current_k_bound_for_key = args.k_trunc_bound_values[0]
-
-
-                    plot_iter_filename_suffix = "" 
-                    if args.pde_type == "phenomenological_channel":
-                        _parts = []
-                        if args.use_grf_for_phenom_input: _parts.append(f"grfInA{current_grf_alpha_for_key:.1f}T{args.grf_tau:.1f}")
-                        if args.apply_attenuation: _parts.append(f"att{args.attenuation_loss_factor:.2f}")
-                        if args.apply_additive_sobolev_noise: _parts.append(f"sob{args.sobolev_noise_level_base:.3f}s{args.sobolev_order_s:.1f}")
-                        if args.apply_phase_noise: _parts.append(f"ph{args.phase_noise_std_rad:.2f}")
-                        plot_iter_filename_suffix = "_".join(_parts) if _parts else "no_noise_or_grf_input"
-                    elif args.pde_type == "poisson":
-                        plot_iter_filename_suffix = f"poisson_grfA{current_grf_alpha_for_key:.1f}T{args.grf_tau:.1f}"
-
-                    has_data = False
-                    for k_snn_val in sorted(args.k_snn_output_res_values):
-                        result_key = (k_snn_val, current_k_bound_for_key, args.pde_type, current_grf_alpha_for_key, plot_iter_filename_suffix)
-                        if result_key in all_sweep_results_dict:
-                            data = all_sweep_results_dict[result_key]
-                            ax.plot(data["nominal_coverages"], data["empirical_coverages_theorem"], 
-                                    marker='o', linestyle='-', markersize=4, label=f'$N_{{max}}$={k_snn_val}')
-                            has_data = True
-                    
-                    ax.set_xlabel("Nominal Coverage ($1-\\alpha$)")
-                    if i_plot % ncols_fig == 0: ax.set_ylabel("Empirical Coverage") # Corrected y-axis label
-                    title_val_str = f"{current_primary_val:.1f}" if isinstance(current_primary_val, float) else str(current_primary_val)
-                    ax.set_title(f"{subplot_var_label_plot} = {title_val_str}")
-                    ax.legend(fontsize='small', loc='lower right'); ax.grid(True); ax.set_xlim(0, 1); ax.set_ylim(0, 1.05)
-                    if not has_data: ax.text(0.5,0.5,"No data",ha='center',va='center',transform=ax.transAxes)
+        if len(swept_grf_alphas) > 1: # Outer loop for figures is grf_alpha
+            for grf_alpha_for_fig in swept_grf_alphas:
+                fig_title_fixed_part = f"GRF $\\alpha={grf_alpha_for_fig:.1f}$"
+                plot_filename_tag = f"GRFalpha{grf_alpha_for_fig:.1f}"
+                current_subplot_sweep_values = swept_k_bounds
+                current_subplot_var_label = "$k_{bound}$"
                 
-                for j_ax_hide in range(num_subplots_plot, nrows_fig * ncols_fig):
-                    if j_ax_hide < len(axes_flat): fig.delaxes(axes_flat[j_ax_hide])
-                
-                fig.suptitle(f"Calibration Curves Under Correction (PDE: {args.pde_type}, Fixed: {figure_title_fixed_var_plot})", fontsize=16) # Corrected title
-                plt.tight_layout() # Corrected: removed rect
-                
-                combined_plot_filename = f"calib_curves_PDE{args.pde_type}_s{args.theorem_s}_nu{args.theorem_nu}_{plot_filename_tag_plot}.png"
-                combined_plot_full_path = os.path.join(args.results_dir_sweep_plots, combined_plot_filename)
-                plt.savefig(combined_plot_full_path)
-                print(f"\nPlot for fixed {figure_title_fixed_var_plot} saved to {combined_plot_full_path}")
-                plt.show()
-
-        elif plot_both_sweeping: # Both grf_alpha and k_trunc_bound are lists with >1 element
-            print("Plotting for each GRF Alpha value (subplots for K_TRUNC_BOUND)...")
-            for grf_alpha_for_fig in sorted(list(set(args.grf_alpha_values))):
-                # ... (This is the plotting logic from the previous version, which is correct for this case) ...
-                # ... It creates one figure per grf_alpha, with subplots for k_trunc_bound.
-                # ... The legend entry $N_{SNNout}$ should be $N_{max}$
-                current_plot_filename_suffix = "" 
+                # Reconstruct the filename_suffix for this specific grf_alpha to match dictionary keys
+                fig_iter_filename_suffix = ""
                 if args.pde_type == "phenomenological_channel":
-                    noise_parts_plot = []; 
-                    if args.use_grf_for_phenom_input: noise_parts_plot.append(f"grfInA{grf_alpha_for_fig:.1f}T{args.grf_tau:.1f}")
-                    if args.apply_attenuation: noise_parts_plot.append(f"att{args.attenuation_loss_factor:.2f}")
-                    if args.apply_additive_sobolev_noise: noise_parts_plot.append(f"sob{args.sobolev_noise_level_base:.3f}s{args.sobolev_order_s:.1f}")
-                    if args.apply_phase_noise: noise_parts_plot.append(f"ph{args.phase_noise_std_rad:.2f}")
-                    current_plot_filename_suffix = "_".join(noise_parts_plot) if noise_parts_plot else "no_noise_or_grf_input"
+                    _parts = []; 
+                    if args.use_grf_for_phenom_input: _parts.append(f"grfInA{grf_alpha_for_fig:.1f}T{args.grf_tau:.1f}")
+                    # ... (add other phenom noise parts based on main args) ...
+                    if args.apply_attenuation: _parts.append(f"att{args.attenuation_loss_factor:.2f}")
+                    if args.apply_additive_sobolev_noise: _parts.append(f"sob{args.sobolev_noise_level_base:.3f}s{args.sobolev_order_s:.1f}")
+                    if args.apply_phase_noise: _parts.append(f"ph{args.phase_noise_std_rad:.2f}")
+                    fig_iter_filename_suffix = "_".join(_parts) if _parts else "no_noise_or_grf_input"
                 elif args.pde_type == "poisson":
-                    current_plot_filename_suffix = f"poisson_grfA{grf_alpha_for_fig:.1f}T{args.grf_tau:.1f}"
+                    fig_iter_filename_suffix = f"poisson_grfA{grf_alpha_for_fig:.1f}T{args.grf_tau:.1f}OffS{args.grf_offset_sigma:.1f}"
+                elif args.pde_type == "step_index_fiber":
+                    fig_iter_filename_suffix = (f"fiber_GRFinA{grf_alpha_for_fig:.1f}T{args.grf_tau:.1f}_"
+                                               f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
+                                               f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
 
-                primary_sweep_values_plot = sorted(list(set(args.k_trunc_bound_values)))
-                num_subplots_plot = len(primary_sweep_values_plot)
-                subplot_var_label_plot = "$k_{bound}$"
-                figure_title_fixed_var_plot = f"GRF $\\alpha={grf_alpha_for_fig:.1f}$"
-                plot_filename_tag_plot = f"GRFalpha{grf_alpha_for_fig:.1f}"
 
-                if num_subplots_plot == 0: continue
-                ncols_fig = num_subplots_plot if num_subplots_plot <= 3 else int(np.ceil(np.sqrt(num_subplots_plot)))
-                nrows_fig = 1 if num_subplots_plot <= 3 else int(np.ceil(num_subplots_plot / ncols_fig))
-                if nrows_fig == 0: nrows_fig = 1; 
-                if ncols_fig == 0: ncols_fig = 1;
-
-                fig, axes = plt.subplots(nrows_fig, ncols_fig, figsize=(ncols_fig * 5.5, nrows_fig * 5), sharex=True, sharey=True, squeeze=False)
+                num_subplots_this_fig = len(current_subplot_sweep_values)
+                if num_subplots_this_fig == 0: continue
+                ncols_fig = 2 if num_subplots_this_fig > 1 else 1
+                nrows_fig = int(np.ceil(num_subplots_this_fig / ncols_fig))
+                fig, axes = plt.subplots(nrows_fig, ncols_fig, figsize=(ncols_fig * 6, nrows_fig * 5), sharex=True, sharey=True, squeeze=False)
                 axes_flat = axes.flatten()
-                plot_successful_for_this_fig = False
-                for i_plot, current_primary_val in enumerate(primary_sweep_values_plot): # current_primary_val is k_bound here
-                    ax = axes_flat[i_plot]
+                plot_successful_this_figure = False
+
+                for i_subplot, subplot_iter_val in enumerate(current_subplot_sweep_values): # subplot_iter_val is k_bound
+                    ax = axes_flat[i_subplot]
                     ax.plot([0, 1], [0, 1], linestyle='--', color='gray', label='Ideal Coverage')
                     has_data_for_this_subplot = False
                     for k_snn_val in sorted(args.k_snn_output_res_values):
-                        result_key = (k_snn_val, current_primary_val, args.pde_type, grf_alpha_for_fig, current_plot_filename_suffix)
+                        result_key = (k_snn_val, subplot_iter_val, args.pde_type, grf_alpha_for_fig, fig_iter_filename_suffix)
                         if result_key in all_sweep_results_dict:
                             data = all_sweep_results_dict[result_key]
-                            ax.plot(data["nominal_coverages"], data["empirical_coverages_theorem"], marker='o', linestyle='-', markersize=4, label=f'$N_{{max}}$={k_snn_val}') # Corrected Legend
-                            has_data_for_this_subplot = True; plot_successful_for_this_fig = True
+                            ax.plot(data["nominal_coverages"], data["empirical_coverages_theorem"], marker='o', linestyle='-', markersize=4, label=f'$N_{{max}}$={k_snn_val}')
+                            has_data_for_this_subplot = True; plot_successful_this_figure = True
                     ax.set_xlabel("Nominal Coverage ($1-\\alpha$)")
-                    if i_plot % ncols_fig == 0: ax.set_ylabel("Empirical Coverage") # Corrected Y-label
-                    title_val_str = f"{current_primary_val:.1f}" if isinstance(current_primary_val, float) else str(current_primary_val)
-                    ax.set_title(f"{subplot_var_label_plot} = {title_val_str}")
-                    ax.legend(fontsize='small', loc='lower right'); ax.grid(True); ax.set_xlim(0, 1); ax.set_ylim(0, 1.05)
+                    if i_subplot % ncols_fig == 0: ax.set_ylabel("Empirical Coverage")
+                    ax.set_title(f"{current_subplot_var_label} = {subplot_iter_val}")
+                    ax.legend(fontsize='x-small', loc='lower right'); ax.grid(True); ax.set_xlim(0, 1); ax.set_ylim(0, 1.05)
                     if not has_data_for_this_subplot: ax.text(0.5,0.5,"No data",ha='center',va='center',transform=ax.transAxes)
-                for j_ax_hide in range(num_subplots_plot, nrows_fig * ncols_fig):
+                
+                for j_ax_hide in range(num_subplots_this_fig, nrows_fig * ncols_fig):
                     if j_ax_hide < len(axes_flat): fig.delaxes(axes_flat[j_ax_hide])
-                if plot_successful_for_this_fig:
-                    fig.suptitle(f"Calibration Curves Under Correction (PDE: {args.pde_type}, Fixed: {figure_title_fixed_var_plot})", fontsize=16) # Corrected Title
-                    plt.tight_layout() # Corrected: removed rect
-                    combined_plot_filename = f"calib_curves_PDE{args.pde_type}_s{args.theorem_s}_nu{args.theorem_nu}_{plot_filename_tag_plot}_{current_plot_filename_suffix}.png"
+                if plot_successful_this_figure:
+                    fig.suptitle(f"Calibration Curves Under Correction (PDE: {args.pde_type}, {fig_title_fixed_part})", fontsize=16)
+                    plt.tight_layout()
+                    combined_plot_filename = f"calib_curves_PDE{args.pde_type}_s{args.theorem_s}_nu{args.theorem_nu}_{plot_filename_tag}_{fig_iter_filename_suffix}.png"
                     combined_plot_full_path = os.path.join(args.results_dir_sweep_plots, combined_plot_filename)
-                    plt.savefig(combined_plot_full_path); print(f"\nPlot for {figure_title_fixed_var_plot} saved to {combined_plot_full_path}"); plt.show()
-                else: plt.close(fig); print(f"  No data to plot for {figure_title_fixed_var_plot}.")
-        else: # Single plot scenario (only one grf_alpha and one k_trunc_bound)
-            # ... (single plot logic as before, ensuring title, labels, legend are correct) ...
-            fig, ax = plt.subplots(1, 1, figsize=(6, 5.5)) 
+                    plt.savefig(combined_plot_full_path); print(f"\nPlot for {fig_title_fixed_part} saved to {combined_plot_full_path}"); plt.show()
+                else: plt.close(fig); print(f"  No data to plot for {fig_title_fixed_part}.")
+        
+        elif len(swept_k_bounds) > 1: # Only k_bound is swept with multiple values (grf_alpha is fixed)
+            fixed_grf_alpha_plot = args.grf_alpha_values[0]
+            primary_sweep_values_plot = swept_k_bounds
+            num_subplots_plot = len(primary_sweep_values_plot)
+            subplot_var_label_plot = "$k_{bound}$"
+            figure_title_fixed_var_plot = f"GRF $\\alpha={fixed_grf_alpha_plot:.1f}$"
+            plot_filename_tag_plot = f"vs_Kbound_GRFalpha{fixed_grf_alpha_plot:.1f}"
+            
+            # Reconstruct the filename_suffix for this fixed grf_alpha
+            fig_iter_filename_suffix = ""
+            if args.pde_type == "phenomenological_channel":
+                _parts = []; 
+                if args.use_grf_for_phenom_input: _parts.append(f"grfInA{fixed_grf_alpha_plot:.1f}T{args.grf_tau:.1f}")
+                # ... (add other phenom noise parts based on main args) ...
+                if args.apply_attenuation: _parts.append(f"att{args.attenuation_loss_factor:.2f}")
+                if args.apply_additive_sobolev_noise: _parts.append(f"sob{args.sobolev_noise_level_base:.3f}s{args.sobolev_order_s:.1f}")
+                if args.apply_phase_noise: _parts.append(f"ph{args.phase_noise_std_rad:.2f}")
+                fig_iter_filename_suffix = "_".join(_parts) if _parts else "no_noise_or_grf_input"
+            elif args.pde_type == "poisson":
+                fig_iter_filename_suffix = f"poisson_grfA{fixed_grf_alpha_plot:.1f}T{args.grf_tau:.1f}OffS{args.grf_offset_sigma:.1f}"
+            elif args.pde_type == "step_index_fiber":
+                 fig_iter_filename_suffix = (f"fiber_GRFinA{fixed_grf_alpha_plot:.1f}T{args.grf_tau:.1f}_"
+                                           f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
+                                           f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
+
+
+            ncols_fig = 2 if num_subplots_plot > 1 else 1
+            nrows_fig = int(np.ceil(num_subplots_plot / ncols_fig))
+            fig, axes = plt.subplots(nrows_fig, ncols_fig, figsize=(ncols_fig * 6, nrows_fig * 5.5), sharex=True, sharey=True, squeeze=False)
+            axes_flat = axes.flatten()
+            # ... (Plotting loop similar to the one above, iterating over primary_sweep_values_plot which are k_bounds) ...
+            for i_plot, current_primary_val in enumerate(primary_sweep_values_plot): # current_primary_val is k_bound here
+                ax = axes_flat[i_plot]
+                ax.plot([0, 1], [0, 1], linestyle='--', color='gray', label='Ideal Coverage')
+                has_data_for_this_subplot = False
+                for k_snn_val in sorted(args.k_snn_output_res_values):
+                    result_key = (k_snn_val, current_primary_val, args.pde_type, fixed_grf_alpha_plot, fig_iter_filename_suffix)
+                    if result_key in all_sweep_results_dict:
+                        data = all_sweep_results_dict[result_key]
+                        ax.plot(data["nominal_coverages"], data["empirical_coverages_theorem"], marker='o', linestyle='-', markersize=4, label=f'$N_{{max}}$={k_snn_val}')
+                        has_data_for_this_subplot = True
+                ax.set_xlabel("Nominal Coverage ($1-\\alpha$)"); 
+                if i_plot % ncols_fig == 0: ax.set_ylabel("Empirical Coverage")
+                ax.set_title(f"{subplot_var_label_plot} = {current_primary_val}"); ax.legend(fontsize='x-small', loc='lower right'); ax.grid(True); ax.set_xlim(0,1); ax.set_ylim(0,1.05)
+                if not has_data_for_this_subplot: ax.text(0.5,0.5,"No data",ha='center',va='center',transform=ax.transAxes)
+            for j_ax_hide in range(num_subplots_plot, nrows_fig * ncols_fig):
+                if j_ax_hide < len(axes_flat): fig.delaxes(axes_flat[j_ax_hide])
+            fig.suptitle(f"Calibration Curves Under Correction (PDE: {args.pde_type}, Fixed: {figure_title_fixed_var_plot})", fontsize=16)
+            plt.tight_layout()
+            combined_plot_filename = f"calib_curves_PDE{args.pde_type}_s{args.theorem_s}_nu{args.theorem_nu}_{plot_filename_tag_plot}_{fig_iter_filename_suffix}.png"
+            combined_plot_full_path = os.path.join(args.results_dir_sweep_plots, combined_plot_filename)
+            plt.savefig(combined_plot_full_path); print(f"\nPlot for fixed {figure_title_fixed_var_plot} saved to {combined_plot_full_path}"); plt.show()
+
+        else: # Both grf_alpha and k_trunc_bound have only one value
+            # Single plot scenario
+            fig, ax = plt.subplots(1, 1, figsize=(6, 5.5))
             ax.plot([0, 1], [0, 1], linestyle='--', color='gray', label='Ideal Coverage')
             has_data = False; fixed_grf_alpha_plot = args.grf_alpha_values[0]; fixed_k_bound_plot = args.k_trunc_bound_values[0]
-            plot_filename_suffix_specific = ""
+            
+            plot_filename_suffix_specific = "" # Reconstruct as above
             if args.pde_type == "phenomenological_channel":
                 _parts = []; 
                 if args.use_grf_for_phenom_input: _parts.append(f"grfInA{fixed_grf_alpha_plot:.1f}T{args.grf_tau:.1f}")
@@ -502,22 +516,28 @@ if __name__ == '__main__':
                 if args.apply_additive_sobolev_noise: _parts.append(f"sob{args.sobolev_noise_level_base:.3f}s{args.sobolev_order_s:.1f}")
                 if args.apply_phase_noise: _parts.append(f"ph{args.phase_noise_std_rad:.2f}")
                 plot_filename_suffix_specific = "_".join(_parts) if _parts else "no_noise_or_grf_input"
-            elif args.pde_type == "poisson": plot_filename_suffix_specific = f"poisson_grfA{fixed_grf_alpha_plot:.1f}T{args.grf_tau:.1f}"
+            elif args.pde_type == "poisson": plot_filename_suffix_specific = f"poisson_grfA{fixed_grf_alpha_plot:.1f}T{args.grf_tau:.1f}OffS{args.grf_offset_sigma:.1f}"
+            elif args.pde_type == "step_index_fiber":
+                 plot_filename_suffix_specific = (f"fiber_GRFinA{fixed_grf_alpha_plot:.1f}T{args.grf_tau:.1f}_"
+                                           f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
+                                           f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
+
+
             for k_snn_val in sorted(args.k_snn_output_res_values):
                 result_key = (k_snn_val, fixed_k_bound_plot, args.pde_type, fixed_grf_alpha_plot, plot_filename_suffix_specific)
                 if result_key in all_sweep_results_dict:
                     data = all_sweep_results_dict[result_key]
-                    ax.plot(data["nominal_coverages"], data["empirical_coverages_theorem"], marker='o', linestyle='-', markersize=4, label=f'$N_{{max}}$={k_snn_val}') # Corrected Legend
+                    ax.plot(data["nominal_coverages"], data["empirical_coverages_theorem"], marker='o', linestyle='-', markersize=4, label=f'$N_{{max}}$={k_snn_val}')
                     has_data = True
-            ax.set_xlabel("Nominal Coverage ($1-\\alpha$)"); ax.set_ylabel("Empirical Coverage") # Corrected Y-label
-            ax.set_title(f"GRF $\\alpha={fixed_grf_alpha_plot:.1f}, k_{{bound}}={fixed_k_bound_plot}$")
+            ax.set_xlabel("Nominal Coverage ($1-\\alpha$)"); ax.set_ylabel("Empirical Coverage")
+            ax.set_title(f"Calibration (GRF $\\alpha={fixed_grf_alpha_plot:.1f}, k_{{bound}}={fixed_k_bound_plot}$)")
             ax.legend(fontsize='small', loc='lower right'); ax.grid(True); ax.set_xlim(0, 1); ax.set_ylim(0, 1.05)
             if not has_data: ax.text(0.5,0.5,"No data",ha='center',va='center',transform=ax.transAxes)
-            fig.suptitle(f"Calibration Curves Under Correction (PDE: {args.pde_type})", fontsize=16) # Corrected Title
-            plt.tight_layout() # Corrected: removed rect
-            combined_plot_filename = f"calib_curves_PDE{args.pde_type}_s{args.theorem_s}_nu{args.theorem_nu}_single_config.png"
+            fig.suptitle(f"Calibration Curves Under Correction (PDE: {args.pde_type})", fontsize=16)
+            plt.tight_layout()
+            combined_plot_filename = f"calib_curves_PDE{args.pde_type}_s{args.theorem_s}_nu{args.theorem_nu}_single_config_{plot_filename_suffix_specific}.png"
             combined_plot_full_path = os.path.join(args.results_dir_sweep_plots, combined_plot_filename)
             plt.savefig(combined_plot_full_path); print(f"\nSingle config plot saved to {combined_plot_full_path}"); plt.show()
-
+        
     print("\nSweep complete.")
 
