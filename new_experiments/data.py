@@ -309,7 +309,7 @@ if __name__ == '__main__':
     parser.add_argument('--k_trunc_snn_output', type=int, default=32,
                         help='Truncation for SNN target output spectra (Nout).')
     parser.add_argument('--output_dir', type=str, default="datasets")
-    parser.add_argument('--k_psi0_limit', type=int, default=12,
+    parser.add_argument('--k_psi0_limit', type=int, default=32,
                         help="Max k for GRF base initial state (used if pde_type is step_index_fiber or poisson with GRF).")
 
     # --- GRF parameters (for Poisson source f, OR for step_index_fiber initial state) ---
