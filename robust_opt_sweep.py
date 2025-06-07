@@ -219,7 +219,7 @@ if __name__ == '__main__':
     args.results_dir_rob_opt = os.path.join(args.base_results_dir, "rob_opt_runs")
     os.makedirs(args.results_dir_rob_opt, exist_ok=True)
 
-    robust_opt_script_name = "robust_optimization.py" 
+    robust_opt_script_name = "robust_opt.py" 
     
     param_configurations_for_pool = []
     outer_sweep_product = list(product(args.grf_alpha_values, args.num_distinct_states_M_values))
