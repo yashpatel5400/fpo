@@ -49,11 +49,11 @@ def run_single_robust_opt(params_tuple):
     """
     Worker function for multiprocessing. Runs a single instance of robust_optimization.py.
     """
-    current_grf_alpha, current_m_val, args, robust_opt_script, exp_idx, total_exps = params_tuple
+    current_grf_alpha, current_m_val, current_snn_res, args, robust_opt_script, exp_idx, total_exps = params_tuple
     
     time.sleep(np.random.uniform(0, 0.2))
     log_prefix = f"[Worker {os.getpid()} Exp {exp_idx+1}/{total_exps} " \
-                 f"GRF_A={current_grf_alpha:.1f}, M={current_m_val}] "
+                 f"GRF_A={current_grf_alpha:.1f}, M={current_m_val}, SNN_Res={current_snn_res}] "
     print(f"{log_prefix}Processing configuration...")
 
     # --- Construct necessary filenames and arguments ---
@@ -70,7 +70,7 @@ def run_single_robust_opt(params_tuple):
                            f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
 
     # Define the expected output file path
-    output_filename = f"sweep_run_alpha{current_grf_alpha}_M{current_m_val}_results_M{current_m_val}_alphaCalib{args.alpha_for_radius:.2f}_{filename_suffix}.json"
+    output_filename = f"sweep_run_alpha{current_grf_alpha}_M{current_m_val}_SNNres{current_snn_res}_results_M{current_m_val}_alphaCalib{args.alpha_for_radius:.2f}_{filename_suffix}.json"
     output_filepath = os.path.join(args.results_dir_rob_opt, output_filename)
 
     run_needed = True
@@ -79,12 +79,11 @@ def run_single_robust_opt(params_tuple):
         run_needed = False
     
     if run_needed:
-        # Build the argument list for robust_optimization.py
         robust_opt_args = [
             "--pde_type", args.pde_type,
             "--snn_model_dir", args.snn_model_dir,
             "--n_grid_sim_input_ds", args.n_grid_sim_input_ds,
-            "--snn_output_res", args.snn_output_res,
+            "--snn_output_res", current_snn_res, # This is a swept parameter
             "--snn_hidden_channels", args.snn_hidden_channels,
             "--snn_num_hidden_layers", args.snn_num_hidden_layers,
             "--grf_alpha", current_grf_alpha,
@@ -103,7 +102,7 @@ def run_single_robust_opt(params_tuple):
             "--theorem_d", args.theorem_d,
             "--num_trials_per_config", args.num_trials_per_config,
             "--results_dir", args.results_dir_rob_opt,
-            "--output_json_filename_tag", f"sweep_run_alpha{current_grf_alpha}_M{current_m_val}"
+            "--output_json_filename_tag", f"sweep_run_alpha{current_grf_alpha}_M{current_m_val}_SNNres{current_snn_res}"
         ]
         
         success = run_script(robust_opt_script, robust_opt_args, log_prefix)
@@ -115,7 +114,7 @@ def run_single_robust_opt(params_tuple):
     try:
         with open(output_filepath, 'r') as f:
             result_data = json.load(f)
-        result_key = (current_grf_alpha, current_m_val)
+        result_key = (current_grf_alpha, current_m_val, current_snn_res)
         print(f"{log_prefix}Successfully processed results for key: {result_key}")
         return result_key, result_data
     except Exception as e:
@@ -131,18 +130,17 @@ def generate_latex_table(results_dict, args):
     latex_string += f"{args.pde_type.replace('_', ' ').title()}"
     latex_string += "}\n"
     latex_string += f"\\label{{tab:rob_opt_summary_{args.pde_type}}}\n"
-    latex_string += "\\begin{tabular}{cc S[table-format=1.4] S[table-format=1.4] S[table-format=1.4] S[table-format=1.3] S[table-format=1.3]}\n"
+    latex_string += "\\begin{tabular}{ccc S[table-format=1.4] S[table-format=1.4] S[table-format=1.4] S[table-format=1.3] S[table-format=1.3]}\n"
     latex_string += "\\toprule\n"
-    latex_string += " {$\\rho$} & {M} & {PGM} & {Nominal} & {Robust} & {$p(R>P)$} & {$p(R>N)$} \\\\\n"
+    latex_string += " {$\\rho$} & {M} & {$N_{max}$} & {PGM} & {Nominal} & {Robust} & {$p(R>P)$} & {$p(R>N)$} \\\\\n"
     latex_string += "\\midrule\n"
 
     sorted_keys = sorted(results_dict.keys())
 
     for key in sorted_keys:
         data = results_dict[key]
-        grf_alpha, m_val = key
+        grf_alpha, m_val, snn_res = key
 
-        # Corrected keys to match the JSON output
         pgm_iab = data.get('avg_pgm_IAB', float('nan'))
         nom_iab = data.get('avg_nominal_IAB', float('nan'))
         rob_iab = data.get('avg_robust_IAB', float('nan'))
@@ -164,7 +162,7 @@ def generate_latex_table(results_dict, args):
         else:
             nom_str = f"\\textbf{{{nom_str}}}"
             
-        latex_string += f" {grf_alpha:.1f} & {m_val} & {pgm_str} & {nom_str} & {rob_str} & {p_rob_pgm_str} & {p_rob_nom_str} \\\\\n"
+        latex_string += f" {grf_alpha:.1f} & {m_val} & {snn_res} & {pgm_str} & {nom_str} & {rob_str} & {p_rob_pgm_str} & {p_rob_nom_str} \\\\\n"
 
     latex_string += "\\bottomrule\n"
     latex_string += "\\end{tabular}\n"
@@ -183,6 +181,8 @@ if __name__ == '__main__':
                         help="List of GRF alpha (smoothness) values to sweep over.")
     parser.add_argument('--num_distinct_states_M_values', nargs='+', type=int, default=[3, 4],
                         help="List of M values (number of states) to sweep over.")
+    parser.add_argument('--snn_output_res_values', nargs='+', type=int, default=[32, 48],
+                        help="List of SNN output resolutions to sweep over.")
     
     parser.add_argument('--snn_model_dir', type=str, default="trained_snn_models_sweep_final_v3",
                         help="Directory where pre-trained SNN models are stored.")
@@ -190,7 +190,6 @@ if __name__ == '__main__':
                         help="Base directory where calibration result subdirectories are stored.")
     
     parser.add_argument('--n_grid_sim_input_ds', type=int, default=64)
-    parser.add_argument('--snn_output_res', type=int, default=32)
     parser.add_argument('--snn_hidden_channels', type=int, default=64)
     parser.add_argument('--snn_num_hidden_layers', type=int, default=3)
     parser.add_argument('--grf_tau', type=float, default=1.0)   
@@ -198,7 +197,7 @@ if __name__ == '__main__':
     parser.add_argument('--L_domain', type=float, default=2*np.pi)
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
     parser.add_argument('--fiber_potential_depth', type=float, default=1.0) 
-    parser.add_argument('--grin_strength', type=float, default=0.01) # Changed default to 0.01
+    parser.add_argument('--grin_strength', type=float, default=0.01)
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
     parser.add_argument('--alpha_for_radius', type=float, default=0.1)
@@ -211,7 +210,7 @@ if __name__ == '__main__':
     parser.add_argument('--base_results_dir', type=str, default="sweep_results_rob_opt",
                         help="Base directory to store all results from this sweep.")
     parser.add_argument('--skip_completed_runs', action='store_true', help="Skip runs where the output JSON file already exists.")
-    parser.add_argument('--num_processes', type=int, default=min(os.cpu_count()-1 if os.cpu_count() and os.cpu_count() > 1 else 1, 4),
+    parser.add_argument('--num_processes', type=int, default=min(os.cpu_count()-1 if os.cpu_count() and os.cpu_count() > 1 else 1, 8),
                         help="Number of parallel processes to use.")
 
     args = parser.parse_args()
@@ -222,18 +221,25 @@ if __name__ == '__main__':
     robust_opt_script_name = "robust_opt.py" 
     
     param_configurations_for_pool = []
-    outer_sweep_product = list(product(args.grf_alpha_values, args.num_distinct_states_M_values))
+    outer_sweep_product = list(product(args.grf_alpha_values, args.num_distinct_states_M_values, args.snn_output_res_values))
     total_experiments = len(outer_sweep_product)
 
     print(f"--- Starting Robust Optimization Sweep for PDE Type: {args.pde_type} ---")
     print(f"Sweeping over GRF Alphas: {args.grf_alpha_values}")
     print(f"Sweeping over M values: {args.num_distinct_states_M_values}")
+    print(f"Sweeping over SNN Output Resolutions: {args.snn_output_res_values}")
 
-    for i_exp, (current_grf_alpha, current_m_val) in enumerate(outer_sweep_product):
+    for i_exp, (current_grf_alpha, current_m_val, current_snn_res) in enumerate(outer_sweep_product):
+        # We need to ensure that the robust_opt script is called with the correct snn_output_res for each run
+        # We can pass it as part of the tuple to the worker function
+        current_iter_args = argparse.Namespace(**vars(args))
+        current_iter_args.snn_output_res = current_snn_res # Set current snn_res for this iteration
+
         param_configurations_for_pool.append((
             current_grf_alpha,
             current_m_val,
-            args, 
+            current_snn_res,
+            current_iter_args, 
             robust_opt_script_name,
             i_exp,
             total_experiments
@@ -269,9 +275,9 @@ if __name__ == '__main__':
     # --- Print Summary of Results ---
     print("\n\n--- Robust Optimization Sweep Summary ---")
     print(f"PDE Type: {args.pde_type}")
-    print("-" * 100)
-    print(f"{'GRF Alpha':<12} {'M':<4} {'Avg I_AB (PGM)':<18} {'Avg I_AB (Nominal)':<22} {'Avg I_AB (Robust)':<22} {'p(R>P)':<10} {'p(R>N)':<10}")
-    print("-" * 100)
+    print("-" * 115)
+    print(f"{'GRF Alpha':<12} {'M':<4} {'N_max':<6} {'Avg I_AB (PGM)':<18} {'Avg I_AB (Nominal)':<22} {'Avg I_AB (Robust)':<22} {'p(R>P)':<10} {'p(R>N)':<10}")
+    print("-" * 115)
 
     sorted_keys = sorted(all_sweep_results_dict.keys())
 
@@ -280,18 +286,17 @@ if __name__ == '__main__':
     else:
         for key in sorted_keys:
             data = all_sweep_results_dict[key]
-            grf_alpha, m_val = key
+            grf_alpha, m_val, snn_res = key
             
-            # Corrected keys
             pgm_iab = data.get('avg_pgm_IAB', float('nan'))
             nom_iab = data.get('avg_nominal_IAB', float('nan'))
             rob_iab = data.get('avg_robust_IAB', float('nan'))
             p_val_rob_gt_pgm = data.get('p_value_rob_gt_pgm', 1.0)
             p_val_rob_gt_nom = data.get('p_value_rob_gt_nom', 1.0)
 
-            print(f"{grf_alpha:<12.2f} {m_val:<4} {pgm_iab:<18.4f} {nom_iab:<22.4f} {rob_iab:<22.4f} {p_val_rob_gt_pgm:<10.3f} {p_val_rob_gt_nom:<10.3f}")
+            print(f"{grf_alpha:<12.2f} {m_val:<4} {snn_res:<6} {pgm_iab:<18.4f} {nom_iab:<22.4f} {rob_iab:<22.4f} {p_val_rob_gt_pgm:<10.3f} {p_val_rob_gt_nom:<10.3f}")
     
-    print("-" * 100)
+    print("-" * 115)
     
     # --- Generate and Save LaTeX Table ---
     if all_sweep_results_dict:
