@@ -315,7 +315,7 @@ if __name__ == '__main__':
                     correction_term_this_sample = B_value_this_sample 
                 else: 
                     if snn_output_res_val > 0: 
-                        scaling_factor = (snn_output_res_val**(-2 * args.nu_theorem)) 
+                        scaling_factor = ((snn_output_res_val // 2 * args.d_dimensions)**(-2 * args.nu_theorem)) 
                         correction_term_this_sample = B_value_this_sample * scaling_factor
                     else: 
                         correction_term_this_sample = float('inf') if B_value_this_sample > 1e-9 else 0.0

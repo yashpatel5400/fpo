@@ -343,14 +343,16 @@ if __name__ == '__main__':
                     current_color = color_cycle[i_snn % len(color_cycle)]
 
                     if result_key_lookup in all_sweep_results_dict:
+                        # NOTE: code is written with "truncation" being the *number* of modes, but N_max is actually half of that
+                        # since the number of modes extends on both the positive *and* negative sides
                         data = all_sweep_results_dict[result_key_lookup]
                         ax.plot(data["nominal_coverages"], data["empirical_coverages_theorem"], 
                                 marker='o', linestyle='-', markersize=4, color=current_color,
-                                label=f'$N_{{max}}$={k_snn_val} (Corrected)')
+                                label=f'$N_{{max}}$={k_snn_val // 2} (Corrected)')
                         if data.get("empirical_coverages_no_correction") is not None:
                              ax.plot(data["nominal_coverages"], data["empirical_coverages_no_correction"], 
                                      marker='x', linestyle='--', markersize=4, color=current_color,
-                                     label=f'$N_{{max}}$={k_snn_val} (Uncorrected)')
+                                     label=f'$N_{{max}}$={k_snn_val // 2} (Uncorrected)')
                         has_data_for_this_subplot = True
                         plot_successful_overall = True
                 
