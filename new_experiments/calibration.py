@@ -6,36 +6,8 @@ import matplotlib.pyplot as plt
 import os
 import argparse 
 
-# --- SNN Model Definition (should match the one used for training) ---
-class SimpleSpectralOperatorCNN(nn.Module):
-    def __init__(self, K_input_resolution, K_output_resolution, hidden_channels=64, num_hidden_layers=3):
-        super().__init__()
-        self.K_input_resolution = K_input_resolution
-        self.K_output_resolution = K_output_resolution
-        
-        if K_output_resolution > K_input_resolution:
-            raise ValueError("K_output_resolution cannot be greater than K_input_resolution for this SNN design (cropping output).")
-        
-        layers = []
-        layers.append(nn.Conv2d(2, hidden_channels, kernel_size=3, padding='same'))
-        layers.append(nn.ReLU())
-        
-        for _ in range(num_hidden_layers):
-            layers.append(nn.Conv2d(hidden_channels, hidden_channels, kernel_size=3, padding='same'))
-            layers.append(nn.ReLU())
-            
-        layers.append(nn.Conv2d(hidden_channels, 2, kernel_size=3, padding='same'))
-        self.cnn_body = nn.Sequential(*layers)
-
-    def forward(self, x_spec_ch_full_input): # x_spec_ch_full_input: (batch, 2, K_input, K_input)
-        x_processed_full = self.cnn_body(x_spec_ch_full_input) # Output: (batch, 2, K_input, K_input)
-        
-        if self.K_input_resolution == self.K_output_resolution:
-            return x_processed_full
-        else: 
-            start_idx = self.K_input_resolution // 2 - self.K_output_resolution // 2
-            end_idx = start_idx + self.K_output_resolution
-            return x_processed_full[:, :, start_idx:end_idx, start_idx:end_idx]
+# --- Import SNN Model from model.py ---
+from model import SimpleSpectralOperatorCNN
 
 # --- Data Handling ---
 def spectrum_complex_to_channels_torch(spectrum_mat_complex):
@@ -116,7 +88,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Conformal Prediction for SNN Error (Theorem Validation).")
     
     # --- PDE Type and Dataset Parameters ---
-    parser.add_argument('--pde_type', type=str, default="step_index_fiber", choices=["poisson", "step_index_fiber"])
+    parser.add_argument('--pde_type', type=str, default="step_index_fiber", choices=["poisson", "step_index_fiber", "grin_fiber"])
     parser.add_argument('--n_grid_sim_input_ds', type=int, default=64)
     parser.add_argument('--snn_output_res', type=int, default=32)
     parser.add_argument('--dataset_dir', type=str, default="datasets")
@@ -144,6 +116,7 @@ if __name__ == '__main__':
     parser.add_argument('--L_domain', type=float, default=2*np.pi) 
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
     parser.add_argument('--fiber_potential_depth', type=float, default=1.0) 
+    parser.add_argument('--grin_strength', type=float, default=0.01)
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
     
@@ -168,6 +141,11 @@ if __name__ == '__main__':
         filename_suffix = (f"fiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
                            f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
                            f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
+    elif args.pde_type == "grin_fiber":
+        filename_suffix = (f"grinfiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+                           f"strength{args.grin_strength:.2e}_"
+                           f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
+
     
     if args.snn_model_filename_override: SNN_MODEL_FILENAME = args.snn_model_filename_override
     else: SNN_MODEL_FILENAME = f"snn_PDE{args.pde_type}_Kin{snn_input_res_val}_Kout{snn_output_res_val}_H{args.snn_hidden_channels}_L{args.snn_num_hidden_layers}_{filename_suffix}.pth"
@@ -280,7 +258,7 @@ if __name__ == '__main__':
     weights_source_Hs_Nfull = None
     if args.pde_type == "poisson":
         _, weights_source_Hs_minus_2_Nfull = get_mode_indices_and_weights(N_full_for_theorem, args.d_dimensions, args.s_theorem - 2, 0)
-    if args.pde_type == "step_index_fiber":
+    if args.pde_type == "step_index_fiber" or args.pde_type == "grin_fiber":
         _, weights_source_Hs_Nfull = get_mode_indices_and_weights(N_full_for_theorem, args.d_dimensions, args.s_theorem, 0)
 
     print("\nCalculating empirical coverage on test set...")
@@ -310,17 +288,22 @@ if __name__ == '__main__':
                         norm_source_Hsm2_sq = np.sum(weights_source_Hs_minus_2_Nfull * np.abs(source_coeffs_Nfull)**2)
                         B_value_this_sample = args.elliptic_PDE_const_C_sq * norm_source_Hsm2_sq
                     else: 
-                        B_value_this_sample = 1.0 # Fallback if weights are empty
-                        if N_full_for_theorem > 0 : # Only print warning if weights were expected
+                        B_value_this_sample = 1.0 
+                        if N_full_for_theorem > 0 :
                              print(f"Warning: weights_source_Hs_minus_2_Nfull for Poisson B_value calculation is empty/problematic. Using fallback B=1.0.")
-                elif args.pde_type == "step_index_fiber":
+                elif args.pde_type == "step_index_fiber" or args.pde_type == "grin_fiber":
                     input_state_coeffs_Nfull = gb_full_test_complex
                     if weights_source_Hs_Nfull is not None and weights_source_Hs_Nfull.size > 0:
                         norm_input_Hs_sq = np.sum(weights_source_Hs_Nfull * np.abs(input_state_coeffs_Nfull)**2)
-                        factor_V0_s_corrected = (np.max([2, (1 + 2 * args.fiber_potential_depth**2)]))**args.s_theorem
+                        V_inf = 0
+                        if args.pde_type == "step_index_fiber":
+                            V_inf = args.fiber_potential_depth
+                        elif args.pde_type == "grin_fiber":
+                            V_inf = args.grin_strength * (args.L_domain**2 / 2.0)
+                        factor_V0_s_corrected = (np.max([2, (1 + 2 * V_inf**2)]))**args.s_theorem
                         B_value_this_sample = factor_V0_s_corrected * norm_input_Hs_sq
                     else:
-                        B_value_this_sample = 1.0 # Fallback
+                        B_value_this_sample = 1.0 
                         if N_full_for_theorem > 0 :
                             print(f"Warning: weights_source_Hs_Nfull for Fiber B_value calculation is empty/problematic. Using fallback B=1.0.")
                 else: 
@@ -381,8 +364,16 @@ if __name__ == '__main__':
     save_B_info_str = "Sample_Dependent_B" 
     if args.pde_type == "poisson": 
         save_B_info_str = f"Poisson_Csq_{args.elliptic_PDE_const_C_sq}"
-    elif args.pde_type == "step_index_fiber":
-        save_B_info_str = f"Fiber_V0_{args.fiber_potential_depth}_s_{args.s_theorem}_factor_{(1+2*args.fiber_potential_depth**2)**args.s_theorem:.2e}"
+    elif args.pde_type == "step_index_fiber" or args.pde_type == "grin_fiber":
+        V_inf_for_str = 0
+        if args.pde_type == "step_index_fiber":
+             V_inf_for_str = args.fiber_potential_depth
+        elif args.pde_type == "grin_fiber":
+             V_inf_for_str = args.grin_strength * (args.L_domain**2 / 2.0)
+        
+        factor_for_B = (np.max([2, (1 + 2 * V_inf_for_str**2)]))**args.s_theorem
+        save_B_info_str = f"Fiber_Vinf_{V_inf_for_str:.2e}_s_{args.s_theorem}_factor_{factor_for_B:.2e}"
+
     if not np.isclose(args.nu_theorem, 0.0):
              save_B_info_str += f"_scaled_by_NmaxNu"
 
@@ -400,4 +391,3 @@ if __name__ == '__main__':
                         nu_theorem=args.nu_theorem,
                         d_dimensions=args.d_dimensions) 
     print(f"Coverage data saved to {coverage_data_filename}")
-

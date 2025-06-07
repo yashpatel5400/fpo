@@ -3,150 +3,23 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from scipy.optimize import minimize
-# import matplotlib.pyplot as plt # Kept commented unless debugging
 import os
 from scipy import stats
 import argparse 
 import json 
 
+# --- Import functions from other scripts ---
+# Assuming data.py, model.py, and calibration.py are in the same directory or accessible
+from model import SimpleSpectralOperatorCNN, spectrum_complex_to_channels_torch, channels_to_spectrum_complex_torch
+from data import (GaussianRF, get_full_centered_spectrum, normalize_spectrum, 
+                    get_step_index_fiber_potential, get_grin_fiber_potential, solver_main)
+from calibration import extract_center_block_np
+
 # --- Global constants for solver ---
 HBAR_CONST = 1.0
 MASS_CONST = 1.0
 
-# --- SNN Model Definition ---
-class SimpleSpectralOperatorCNN(nn.Module):
-    def __init__(self, K_input_resolution, K_output_resolution, hidden_channels=64, num_hidden_layers=3):
-        super().__init__()
-        self.K_input_resolution = K_input_resolution
-        self.K_output_resolution = K_output_resolution
-        
-        if K_output_resolution > K_input_resolution:
-            raise ValueError("K_output_resolution > K_input_resolution not supported by this SNN design.")
-        
-        layers = []
-        layers.append(nn.Conv2d(2, hidden_channels, kernel_size=3, padding='same'))
-        layers.append(nn.ReLU())
-        
-        for _ in range(num_hidden_layers):
-            layers.append(nn.Conv2d(hidden_channels, hidden_channels, kernel_size=3, padding='same'))
-            layers.append(nn.ReLU())
-            
-        layers.append(nn.Conv2d(hidden_channels, 2, kernel_size=3, padding='same'))
-        self.cnn_body = nn.Sequential(*layers)
-
-    def forward(self, x_spec_ch_full_input): 
-        x_processed_full = self.cnn_body(x_spec_ch_full_input)
-        if self.K_input_resolution == self.K_output_resolution:
-            return x_processed_full
-        else: 
-            start_idx = self.K_input_resolution // 2 - self.K_output_resolution // 2
-            end_idx = start_idx + self.K_output_resolution
-            return x_processed_full[:, :, start_idx:end_idx, start_idx:end_idx]
-
-# --- Data Handling & Physics Functions ---
-def spectrum_complex_to_channels_torch(spectrum_mat_complex):
-    if not isinstance(spectrum_mat_complex, torch.Tensor):
-        spectrum_mat_complex = torch.from_numpy(spectrum_mat_complex)
-    
-    if not torch.is_complex(spectrum_mat_complex): 
-        if spectrum_mat_complex.ndim == 3 and spectrum_mat_complex.shape[0] == 2: 
-            return spectrum_mat_complex.float() 
-        if spectrum_mat_complex.ndim == 2 and not torch.is_complex(spectrum_mat_complex):
-             raise ValueError(f"Input spectrum_mat_complex is real [K,K] but expected complex or [2,K,K] real.")
-        raise ValueError(f"Input spectrum_mat_complex has shape {spectrum_mat_complex.shape}. Expected complex [K,K] or real [2,K,K].")
-        
-    return torch.stack([spectrum_mat_complex.real, spectrum_mat_complex.imag], dim=0).float()
-
-def channels_to_spectrum_complex_torch(channels_mat_real_imag):
-    if channels_mat_real_imag.ndim != 3 or channels_mat_real_imag.shape[0] != 2: 
-        raise ValueError(f"Input must have 2 channels as the first dimension, got shape {channels_mat_real_imag.shape}")
-    return torch.complex(channels_mat_real_imag[0], channels_mat_real_imag[1])
-
-class GaussianRF(object): 
-    def __init__(self, dim, size, alpha=2, tau=3, sigma=None, device=None):
-        self.dim = dim
-        if device is not None:
-            self.device = device
-        else:
-            self.device = torch.device("cpu")
-
-        if sigma is None:
-            sigma = tau**(0.5*(2*alpha - self.dim))
-
-        k_max = size // 2
-        if dim == 2:
-            import math
-            if k_max > 0:
-                k_range = torch.arange(start=0, end=k_max, step=1, device=self.device)
-                wavenumbers_half = torch.cat((k_range, torch.arange(start=-k_max, end=0, step=1, device=self.device)), 0)
-            else:
-                wavenumbers_half = torch.tensor([0], device=self.device)
-            
-            wavenumbers = wavenumbers_half.repeat(size,1)
-
-            k_x = wavenumbers.transpose(0, 1)
-            k_y = wavenumbers
-            
-            self.sqrt_eig = ((size**2)*math.sqrt(2.0)*sigma*((4*(math.pi**2)*(k_x**2+k_y**2)+tau**2)**(-alpha/2.0)))
-            if self.sqrt_eig.numel() > 0 and k_max > 0 :
-                self.sqrt_eig[0,0] = 0.0
-        else:
-            raise ValueError("Dimension must be 2 for this GRF in robust_opt.")
-        self.size_tuple = tuple([size]*dim)
-
-    def sample(self, N_samples):
-        if self.sqrt_eig.numel() == 0 and self.size_tuple[0] > 0 : 
-            return torch.zeros(N_samples, *self.size_tuple, dtype=torch.float32) 
-            
-        coeff = torch.randn(N_samples, *self.size_tuple, dtype=torch.cfloat, device=self.device)
-        if self.sqrt_eig.numel() > 0 :
-            coeff = self.sqrt_eig * coeff 
-            
-        return torch.fft.ifftn(coeff, dim=list(range(-self.dim, 0))).real
-
-def get_full_centered_spectrum(psi_real_space):
-    N_grid = psi_real_space.shape[0]
-    if N_grid == 0:
-        return np.array([], dtype=np.complex64)
-    return np.fft.fftshift(np.fft.fft2(psi_real_space))
-
-def normalize_spectrum(spectrum_complex):
-    if spectrum_complex.size == 0:
-        return spectrum_complex
-    norm_sq = np.sum(np.abs(spectrum_complex)**2)
-    if norm_sq > 1e-14:
-        return spectrum_complex / np.sqrt(norm_sq)
-    return np.zeros_like(spectrum_complex)
-
-def extract_center_block_np(full_spectrum_centered_np, K_extract):
-    N_full = full_spectrum_centered_np.shape[0]
-    if K_extract == N_full:
-        return full_spectrum_centered_np
-    if K_extract > N_full: 
-        padded_block = np.zeros((K_extract, K_extract), dtype=full_spectrum_centered_np.dtype)
-        start_pad_x = K_extract//2 - N_full//2
-        end_pad_x = start_pad_x + N_full
-        start_pad_y = K_extract//2 - N_full//2
-        end_pad_y = start_pad_y + N_full
-        valid_src_s_x=max(0,-start_pad_x)
-        valid_src_e_x=N_full-max(0,end_pad_x-K_extract)
-        valid_dst_s_x=max(0,start_pad_x)
-        valid_dst_e_x=K_extract-max(0,K_extract-end_pad_x)
-        valid_src_s_y=max(0,-start_pad_y)
-        valid_src_e_y=N_full-max(0,end_pad_y-K_extract)
-        valid_dst_s_y=max(0,start_pad_y)
-        valid_dst_e_y=K_extract-max(0,K_extract-end_pad_y)
-        if valid_src_e_x > valid_src_s_x and valid_src_e_y > valid_src_s_y and \
-           valid_dst_e_x > valid_dst_s_x and valid_dst_e_y > valid_dst_s_y:
-             padded_block[valid_dst_s_x:valid_dst_e_x, valid_dst_s_y:valid_dst_e_y] = \
-                 full_spectrum_centered_np[valid_src_s_x:valid_src_e_x, valid_src_s_y:valid_src_e_y]
-        return padded_block
-    if K_extract <= 0:
-        return np.array([], dtype=np.complex64)
-    start_idx = N_full//2 - K_extract//2
-    end_idx = start_idx + K_extract
-    return full_spectrum_centered_np[start_idx:end_idx, start_idx:end_idx]
-
+# --- Unique Functions for this Script ---
 def generate_initial_GUS_states_via_phase_ramp(M_states, N_grid, L_domain, grf_alpha, grf_tau, delta_n_vector):
     grf_gen_for_base = GaussianRF(dim=2, size=N_grid, alpha=grf_alpha, tau=grf_tau)
     gamma_0_real_unnorm = grf_gen_for_base.sample(1).cpu().numpy().squeeze()
@@ -173,57 +46,6 @@ def generate_initial_GUS_states_via_phase_ramp(M_states, N_grid, L_domain, grf_a
         initial_states_real_space.append(gamma_k_real)
     return initial_states_real_space
 
-def get_step_index_fiber_potential(N_grid, L_domain, core_radius_factor, potential_depth):
-    actual_core_radius = core_radius_factor * (L_domain / 2.0)
-    coords1d_edge = np.linspace(-L_domain / 2.0, L_domain / 2.0, N_grid, endpoint=False)
-    dx = L_domain / N_grid
-    coords1d_center = coords1d_edge + dx / 2.0 
-    x_mg, y_mg = np.meshgrid(coords1d_center, coords1d_center, indexing='ij')
-    
-    rr = np.sqrt(x_mg**2 + y_mg**2)
-    potential = np.zeros((N_grid, N_grid), dtype=float)
-    potential[rr < actual_core_radius] = -potential_depth 
-    return potential
-
-def split_step_solver_2d(V_grid, psi0, N, dx, T, num_steps, hbar_val, m_val):
-    dt = T / num_steps
-    psi = psi0.astype(np.complex128).copy() 
-    
-    V_op = np.exp(-0.5j * dt / hbar_val * V_grid)
-    
-    k_vec = 2.0 * np.pi * np.fft.fftfreq(N, d=dx)
-    kx, ky = np.meshgrid(k_vec, k_vec, indexing='ij')
-    k2 = kx**2 + ky**2
-    K_op = np.exp(-0.5j * hbar_val * dt / m_val * k2) 
-
-    for _ in range(num_steps):
-        psi = psi * V_op 
-        psi_k = np.fft.fft2(psi)
-        psi_k = psi_k * K_op 
-        psi = np.fft.ifft2(psi_k)
-        psi = psi * V_op 
-    return psi
-
-def solver_main(V_potential, psi0_real_space, N_grid, L_domain, T_evolution, num_solver_steps, hbar, m):
-    dx = L_domain / N_grid
-    
-    norm_psi0 = np.linalg.norm(psi0_real_space)
-    if norm_psi0 > 1e-14:
-        psi0_normalized = psi0_real_space / norm_psi0
-    else: 
-        psi0_normalized = np.zeros_like(psi0_real_space)
-        if N_grid > 0: 
-            psi0_normalized.flat[0] = 1.0 
-            psi0_normalized = psi0_normalized / np.linalg.norm(psi0_normalized) 
-
-    psi_T = split_step_solver_2d(V_potential, psi0_normalized, N_grid, dx, T_evolution, num_solver_steps, hbar, m)
-    
-    norm_psi_T = np.linalg.norm(psi_T)
-    if norm_psi_T > 1e-14:
-        psi_T = psi_T / norm_psi_T
-    return psi_T
-
-# --- Core I_AB Calculation and Optimization Functions ---
 def calculate_conditional_probs_p_j_given_k_torch(phi_full_torch, x_s_torch, M_val):
     target_device = x_s_torch.device
     phi_full_torch = phi_full_torch.to(target_device)
@@ -265,7 +87,7 @@ def calculate_I_AB_components_torch(phi_params_torch, M_val, x_s_torch, q_priors
     p_j_given_0 = p_j_given_k_matrix[0, :]
     
     H_cond_terms = p_j_given_0 * torch.log2(p_j_given_0 + eps) 
-    H_cond = -torch.sum(torch.where(p_j_given_0 > eps, H_cond_terms, torch.tensor(0.0, device=target_device)))
+    H_cond = -torch.sum(torch.where(p_j_given_0 > eps, H_cond_terms, torch.tensor(0.0, dtype=torch.float64, device=target_device)))
     
     P_B_j_list = []
     for j_idx in range(M_val):
@@ -280,7 +102,7 @@ def calculate_I_AB_components_torch(phi_params_torch, M_val, x_s_torch, q_priors
             P_B = torch.ones_like(P_B, device=target_device) / M_val
 
     H_B_terms = P_B * torch.log2(P_B + eps) 
-    H_B = -torch.sum(torch.where(P_B > eps, H_B_terms, torch.tensor(0.0, device=target_device)))
+    H_B = -torch.sum(torch.where(P_B > eps, H_B_terms, torch.tensor(0.0, dtype=torch.float64, device=target_device)))
     
     I_AB = H_B - H_cond
     return I_AB, H_B, H_cond
@@ -413,9 +235,11 @@ def main(args):
     print(f"SNN Model Path: {args.snn_model_path}")
     if args.pde_type == "step_index_fiber":
         print(f"  Fiber Params: L_domain={args.L_domain}, CoreFactor={args.fiber_core_radius_factor}, Depth={args.fiber_potential_depth}, T_evo={args.evolution_time_T}")
+    elif args.pde_type == "grin_fiber":
+        print(f"  GRIN Fiber Params: L_domain={args.L_domain}, Strength={args.grin_strength}, T_evo={args.evolution_time_T}")
+
     
     # --- Construct Calibration Data File Path ---
-    # Filename suffix for calibration data (based on how calibration.py saves it)
     calib_filename_suffix = ""
     if args.pde_type == "poisson":
         calib_filename_suffix = f"poisson_grfA{args.grf_alpha:.1f}T{args.grf_tau:.1f}OffS{args.grf_offset_sigma:.1f}"
@@ -423,17 +247,20 @@ def main(args):
         calib_filename_suffix = (f"fiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
                                  f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
                                  f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
+    elif args.pde_type == "grin_fiber":
+        calib_filename_suffix = (f"grinfiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+                                 f"strength{args.grin_strength:.2e}_"
+                                 f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
+
     
-    # Subdirectory name for calibration results
-    calib_results_subdir_name = (f"PDE{args.pde_type}_NinDS{args.n_grid_sim_input_ds}_SNNres{args.snn_output_res}_" # SNNres changed to SNNres
+    calib_results_subdir_name = (f"PDE{args.pde_type}_NinDS{args.n_grid_sim_input_ds}_SNNres{args.snn_output_res}_"
                                  f"KfullThm{args.n_grid_sim_input_ds}_s{args.theorem_s}_nu{args.theorem_nu}_{calib_filename_suffix}")
     
-    # Actual .npz filename from calibration.py
     coverage_data_filename_npz = os.path.join(
         args.calibration_results_base_dir, 
         calib_results_subdir_name,
         f"coverage_data_PDE{args.pde_type}_thm_s{args.theorem_s}_nu{args.theorem_nu}_d{args.theorem_d}"
-        f"_Nin{args.n_grid_sim_input_ds}_SNNout{args.snn_output_res}_NfullThm{args.n_grid_sim_input_ds}" # No KB0factor in filename itself
+        f"_Nin{args.n_grid_sim_input_ds}_SNNout{args.snn_output_res}_NfullThm{args.n_grid_sim_input_ds}"
         f"_{calib_filename_suffix}.npz"
     )
     print(f"Attempting to load calibration data from: {coverage_data_filename_npz}")
@@ -441,17 +268,13 @@ def main(args):
     L2_ball_radius_calculated = 0.1 # Default
     try:
         calib_data = np.load(coverage_data_filename_npz)
-        # Assuming 'nominal_coverages' are 1-alpha and 'avg_R_bounds_for_alpha' is q_star for that 1-alpha
-        # We need to find the index corresponding to args.alpha_for_radius
         
-        # Option 1: If 'alpha_values_for_quantiles' is saved (ideal)
         if 'alpha_values_for_quantiles' in calib_data:
             alpha_values_from_calib = calib_data['alpha_values_for_quantiles']
             closest_alpha_idx = np.argmin(np.abs(alpha_values_from_calib - args.alpha_for_radius))
             if np.abs(alpha_values_from_calib[closest_alpha_idx] - args.alpha_for_radius) > 1e-3:
                 print(f"Warning: Specified alpha_for_radius {args.alpha_for_radius} not found exactly. Using closest: {alpha_values_from_calib[closest_alpha_idx]:.3f}")
             actual_alpha_used = alpha_values_from_calib[closest_alpha_idx]
-        # Option 2: Derive from 'nominal_coverages' (1-alpha)
         elif 'nominal_coverages' in calib_data:
             calib_1_minus_alphas = calib_data['nominal_coverages']
             target_1_minus_alpha = 1.0 - args.alpha_for_radius
@@ -464,16 +287,7 @@ def main(args):
             raise KeyError("Neither 'alpha_values_for_quantiles' nor 'nominal_coverages' found in calibration data.")
 
         q_star_val = calib_data['avg_R_bounds_for_alpha'][closest_alpha_idx] 
-        
-        if q_star_val < 0:
-            print(f"Warning: q_star_val from calibration data is negative ({q_star_val:.4e}). Using absolute value for sqrt.")
-            q_star_val_for_sqrt = abs(q_star_val)
-        else:
-            q_star_val_for_sqrt = q_star_val
-
-        L2_ball_radius_calculated_sq = (args.num_distinct_states_M**2) * (2 * np.sqrt(q_star_val_for_sqrt) + q_star_val)
-        L2_ball_radius_calculated = np.sqrt(L2_ball_radius_calculated_sq)
-        L2_ball_radius_calculated = 0.1
+        L2_ball_radius_calculated = q_star_val
         print(f"Loaded calibration data. For target alpha~{args.alpha_for_radius:.3f} (used {actual_alpha_used:.3f}), found q*={q_star_val:.4e}.")
         print(f"Calculated L2 Uncertainty Ball Radius for Robust Opt: {L2_ball_radius_calculated:.4e}")
 
@@ -525,11 +339,19 @@ def main(args):
             list_gamma_b_k_full_input_spec.append(normalize_spectrum(spec_unnorm))
 
         list_gamma_a_k_true_Nout_spec = []
+        
+        potential_V = None
         if args.pde_type == "step_index_fiber":
             potential_V = get_step_index_fiber_potential(args.n_grid_sim_input_ds, 
                                                          args.L_domain, 
                                                          args.fiber_core_radius_factor, 
                                                          args.fiber_potential_depth)
+        elif args.pde_type == "grin_fiber":
+            potential_V = get_grin_fiber_potential(args.n_grid_sim_input_ds,
+                                                       args.L_domain,
+                                                       args.grin_strength)
+        
+        if args.pde_type in ["step_index_fiber", "grin_fiber"]:
             for psi0_real_k_norm in initial_states_psi0_real: 
                 psi_T_real = solver_main(potential_V, psi0_real_k_norm, 
                                      N_grid=args.n_grid_sim_input_ds, L_domain=args.L_domain, 
@@ -643,6 +465,10 @@ def main(args):
         filename_suffix_run = (f"fiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
                                f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
                                f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
+    elif args.pde_type == "grin_fiber":
+        filename_suffix_run = (f"grinfiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+                           f"strength{args.grin_strength:.2e}_"
+                           f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
 
     output_filename = f"results_M{args.num_distinct_states_M}_alphaCalib{args.alpha_for_radius:.2f}_{filename_suffix_run}.json" 
     if args.output_json_filename_tag:
@@ -667,7 +493,7 @@ if __name__ == '__main__':
     
     # --- PDE Type ---
     parser.add_argument('--pde_type', type=str, default="step_index_fiber", 
-                        choices=["poisson", "step_index_fiber"],
+                        choices=["poisson", "step_index_fiber", "grin_fiber"],
                         help="Type of PDE evolution for the 'true' channel.")
     
     # --- SNN Model Parameters ---
@@ -688,10 +514,11 @@ if __name__ == '__main__':
     parser.add_argument('--k_psi0_limit_dataset', type=int, default=12, 
                         help="Not directly used if GRF is source for initial state, but kept for data_gen script compatibility.")
 
-    # --- Step-Index Fiber Evolution Parameters (if pde_type is step_index_fiber) ---
+    # --- Step-Index & GRIN Fiber Evolution Parameters ---
     parser.add_argument('--L_domain', type=float, default=2*np.pi)
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
     parser.add_argument('--fiber_potential_depth', type=float, default=1.0) 
+    parser.add_argument('--grin_strength', type=float, default=0.01)
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
     parser.add_argument('--hbar_val', type=float, default=HBAR_CONST) 
@@ -703,7 +530,6 @@ if __name__ == '__main__':
                         help='Components of delta_n for GUS phase ramp.')
     parser.add_argument('--alpha_for_radius', type=float, default=0.1,
                         help="Alpha value from calibration to determine the robust radius.")
-    # --calibration_data_file removed, will be constructed
     parser.add_argument('--calibration_results_base_dir', type=str, required=True,
                         help="Base directory where calibration result subdirectories are stored.")
     parser.add_argument('--theorem_s', type=float, default=2.0, help="Theorem s parameter (for calib filename).")
@@ -745,6 +571,10 @@ if __name__ == '__main__':
     elif args.pde_type == "step_index_fiber":
         snn_filename_suffix = (f"fiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
                                f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
+                               f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
+    elif args.pde_type == "grin_fiber":
+        snn_filename_suffix = (f"grinfiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+                               f"strength{args.grin_strength:.2e}_"
                                f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
     
     args.snn_model_path = os.path.join(

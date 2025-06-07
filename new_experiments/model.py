@@ -198,7 +198,7 @@ if __name__ == '__main__':
     
     # --- PDE Type and Dataset Parameters ---
     parser.add_argument('--pde_type', type=str, default="step_index_fiber", 
-                        choices=["poisson", "step_index_fiber"],
+                        choices=["poisson", "step_index_fiber", "grin_fiber"],
                         help="Type of data generation process the dataset corresponds to.")
     parser.add_argument('--n_grid_sim_input_ds', type=int, default=64, 
                         help='Nin: Resolution of gamma_b_full_input in dataset. SNN will take this as input resolution.')
@@ -222,15 +222,14 @@ if __name__ == '__main__':
     parser.add_argument('--plot_save_dir', type=str, default="results_snn_training")
 
     # --- Parameters for Filename Construction (must match data_gen_script) ---
-    # GRF parameters (used for Poisson source f, OR for step_index_fiber initial state)
     parser.add_argument('--grf_alpha', type=float, default=4.0) 
     parser.add_argument('--grf_tau', type=float, default=1.0)   
     parser.add_argument('--grf_offset_sigma', type=float, default=0.5, 
                         help="Sigma for hierarchical offset in Poisson source (f term).")
-    # Step-Index Fiber Waveguide Parameters
-    parser.add_argument('--L_domain', type=float, default=2*np.pi) # Not in filename, but data gen uses it
+    parser.add_argument('--L_domain', type=float, default=2*np.pi) 
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
     parser.add_argument('--fiber_potential_depth', type=float, default=1.0)
+    parser.add_argument('--grin_strength', type=float, default=0.01, help="Strength for GRIN fiber potential.")
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
     
@@ -246,6 +245,10 @@ if __name__ == '__main__':
     elif args.pde_type == "step_index_fiber":
         filename_suffix = (f"fiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
                            f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
+                           f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
+    elif args.pde_type == "grin_fiber":
+        filename_suffix = (f"grinfiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+                           f"strength{args.grin_strength:.2e}_"
                            f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
     
     DATASET_FILENAME = f"dataset_{args.pde_type}_Nin{args.n_grid_sim_input_ds}_Nout{args.k_snn_target_res}_{filename_suffix}.npz"
@@ -311,4 +314,3 @@ if __name__ == '__main__':
     print(f"\nTraining loss plot saved to {full_plot_save_path}")
     plt.show()
     print("\nSNN training script finished.")
-

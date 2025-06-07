@@ -10,7 +10,7 @@ import time # For adding small delay to print statements
 def run_script(script_name, args_list, log_prefix=""):
     """Helper function to run a python script with arguments."""
     command = ["python", script_name] + args_list
-    max_print_len = 250 
+    max_print_len = 2500 
     command_str = ' '.join(command)
     if len(command_str) > max_print_len:
         command_str = command_str[:max_print_len-3] + "..."
@@ -156,7 +156,7 @@ if __name__ == '__main__':
     
     # --- PDE Type ---
     parser.add_argument('--pde_type', type=str, default="step_index_fiber", 
-                        choices=["poisson", "step_index_fiber"], 
+                        choices=["poisson", "step_index_fiber", "grin_fiber"], 
                         help="Type of data generation process for the dataset.")
     
     # --- Sweep Parameters ---
@@ -164,7 +164,6 @@ if __name__ == '__main__':
                         help='List of SNN output resolutions to sweep over.')
     parser.add_argument('--grf_alpha_values', nargs='+', type=float, default=[2.5, 4.0],
                         help="List of GRF alpha values to sweep over.")
-    # --k_trunc_bound_values removed from sweep
     
     # --- Fixed Parameters for Dataset and SNN Structure ---
     parser.add_argument('--n_grid_sim_input_ds', type=int, default=64,
@@ -187,10 +186,11 @@ if __name__ == '__main__':
     parser.add_argument('--grf_tau', type=float, default=1.0)   
     parser.add_argument('--grf_offset_sigma', type=float, default=0.5)
 
-    # --- Step-Index Fiber Parameters ---
+    # --- Step-Index & GRIN Fiber Parameters ---
     parser.add_argument('--L_domain', type=float, default=2*np.pi)
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
     parser.add_argument('--fiber_potential_depth', type=float, default=1.0) 
+    parser.add_argument('--grin_strength', type=float, default=0.01)
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
 
@@ -222,7 +222,6 @@ if __name__ == '__main__':
     conformal_calib_script_name = "calibration.py" 
     
     param_configurations_for_pool = []
-    # The main sweep is now over grf_alpha and k_snn_output_res
     outer_sweep_product = list(product(args.grf_alpha_values, args.k_snn_output_res_values))
     total_experiments = len(outer_sweep_product)
 
@@ -253,12 +252,22 @@ if __name__ == '__main__':
                 "--grf_alpha", str(current_iter_args.grf_alpha), 
                 "--grf_tau", str(current_iter_args.grf_tau)
             ])
+        elif current_iter_args.pde_type == "grin_fiber":
+            current_filename_suffix = (f"grinfiber_GRFinA{current_iter_args.grf_alpha:.1f}T{current_iter_args.grf_tau:.1f}_"
+                                       f"strength{current_iter_args.grin_strength:.2e}_"
+                                       f"evoT{current_iter_args.evolution_time_T:.1e}_steps{current_iter_args.solver_num_steps}")
+            current_base_sub_script_args.extend([
+                "--L_domain", str(current_iter_args.L_domain), 
+                "--grin_strength", str(current_iter_args.grin_strength),
+                "--evolution_time_T", str(current_iter_args.evolution_time_T),
+                "--solver_num_steps", str(current_iter_args.solver_num_steps), 
+                "--grf_alpha", str(current_iter_args.grf_alpha), 
+                "--grf_tau", str(current_iter_args.grf_tau)
+            ])
         
         current_iter_args.filename_suffix_for_this_run = current_filename_suffix
         current_iter_args.base_sub_script_args_for_current_pde = current_base_sub_script_args
         
-        # The worker tuple no longer includes k_bound as a direct parameter
-        # It now directly corresponds to one full pipeline run for a (grf_alpha, k_snn_out) pair
         param_configurations_for_pool.append((
             k_snn_io_res_current, 
             current_iter_args,    
@@ -319,6 +328,11 @@ if __name__ == '__main__':
                      plot_iter_filename_suffix = (f"fiber_GRFinA{current_grf_alpha_plot_val:.1f}T{args.grf_tau:.1f}_"
                                                f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
                                                f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
+                elif args.pde_type == "grin_fiber":
+                     plot_iter_filename_suffix = (f"grinfiber_GRFinA{current_grf_alpha_plot_val:.1f}T{args.grf_tau:.1f}_"
+                                               f"strength{args.grin_strength:.2e}_"
+                                               f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
+
 
                 has_data_for_this_subplot = False
                 for i_snn, k_snn_val in enumerate(sorted(args.k_snn_output_res_values)):
@@ -369,4 +383,3 @@ if __name__ == '__main__':
                 print(f"  No data to plot for any GRF Alpha value in this figure.")
         
     print("\nSweep complete.")
-

@@ -172,6 +172,14 @@ def get_step_index_fiber_potential(N_grid, L_domain, core_radius_factor, potenti
     potential[rr < actual_core_radius] = -potential_depth 
     return potential
 
+def get_grin_fiber_potential(N_grid, L_domain, grin_strength):
+    """Generates a 2D GRIN fiber potential V(x,y) = C * (x^2 + y^2)."""
+    coords1d = np.linspace(-L_domain / 2.0, L_domain / 2.0, N_grid, endpoint=False)
+    x_mg, y_mg = np.meshgrid(coords1d, coords1d, indexing='ij')
+    rr_sq = x_mg**2 + y_mg**2
+    potential = grin_strength * rr_sq
+    return potential
+
 # --- Helper Functions for Spectra ---
 def get_full_centered_spectrum(psi_real_space): 
     """ Computes full 2D FFT and shifts it. Output is UNNORMALIZED."""
@@ -220,7 +228,7 @@ def generate_snn_dataset(num_samples, N_grid_sim_input, K_psi0_band_limit,
     print(f"  Input resolution (gamma_b_full_input & gamma_a_true_full_output): {N_grid_sim_input}x{N_grid_sim_input}")
     print(f"  SNN Target output resolution (gamma_a_snn_target): {K_trunc_snn_output}x{K_trunc_snn_output}")
 
-    if pde_type == "poisson" or pde_type == "step_index_fiber": 
+    if pde_type in ["poisson", "step_index_fiber", "grin_fiber"]:
         grf_generator = GaussianRF(dim=2, size=N_grid_sim_input, 
                                    alpha=grf_config['alpha'], tau=grf_config['tau'], 
                                    device=torch.device("cpu"))
@@ -244,7 +252,7 @@ def generate_snn_dataset(num_samples, N_grid_sim_input, K_psi0_band_limit,
             true_output_real_space_state_u = np.fft.irfft2(u_hat_r, s=initial_real_space_state_f.shape) 
             gamma_a_true_full_spec = get_full_centered_spectrum(true_output_real_space_state_u) # Unnormalized spectrum of u
         
-        elif pde_type == "step_index_fiber":
+        elif pde_type == "step_index_fiber" or pde_type == "grin_fiber":
             initial_real_space_state_unnormalized = grf_generator.sample(1).cpu().numpy().squeeze()
             norm_initial = np.linalg.norm(initial_real_space_state_unnormalized)
             if norm_initial > 1e-14:
@@ -258,10 +266,17 @@ def generate_snn_dataset(num_samples, N_grid_sim_input, K_psi0_band_limit,
             gamma_b_full_spec_unnorm = get_full_centered_spectrum(initial_real_space_state_psi0) 
             gamma_b_full_input_spec = normalize_spectrum(gamma_b_full_spec_unnorm) 
 
-            potential_V = get_step_index_fiber_potential(N_grid_sim_input, 
-                                                         waveguide_config['L_domain'], 
-                                                         waveguide_config['core_radius_factor'], 
-                                                         waveguide_config['potential_depth'])
+            potential_V = None
+            if pde_type == "step_index_fiber":
+                potential_V = get_step_index_fiber_potential(N_grid_sim_input, 
+                                                             waveguide_config['L_domain'], 
+                                                             waveguide_config['core_radius_factor'], 
+                                                             waveguide_config['potential_depth'])
+            elif pde_type == "grin_fiber":
+                potential_V = get_grin_fiber_potential(N_grid_sim_input,
+                                                       waveguide_config['L_domain'],
+                                                       waveguide_config['grin_strength'])
+
             psi_T_real = solver_main(potential_V, initial_real_space_state_psi0, 
                                  N_grid=N_grid_sim_input, 
                                  L_domain=waveguide_config['L_domain'], 
@@ -301,7 +316,7 @@ if __name__ == '__main__':
     
     # --- Core Parameters ---
     parser.add_argument('--pde_type', type=str, default="step_index_fiber", 
-                        choices=["poisson", "step_index_fiber"],
+                        choices=["poisson", "step_index_fiber", "grin_fiber"],
                         help="Type of data generation process.")
     parser.add_argument('--num_samples', type=int, default=100) 
     parser.add_argument('--n_grid_sim_input', type=int, default=64,
@@ -318,13 +333,15 @@ if __name__ == '__main__':
     parser.add_argument('--grf_offset_sigma', type=float, default=0.5, 
                         help="Sigma for hierarchical offset in Poisson source (f term).")
 
-    # --- Step-Index Fiber Waveguide Parameters ---
+    # --- Step-Index & GRIN Fiber Waveguide Parameters ---
     parser.add_argument('--L_domain', type=float, default=2*np.pi, 
                         help="Physical domain size (e.g., 2pi for periodicity).")
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2, 
                         help="Core radius as fraction of L_domain/2.")
     parser.add_argument('--fiber_potential_depth', type=float, default=1.0, 
                         help="Depth V0 of the fiber potential well.")
+    parser.add_argument('--grin_strength', type=float, default=0.01,
+                        help="Strength C of the GRIN fiber potential V(r) = C*r^2.")
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
     parser.add_argument('--hbar_val', type=float, default=HBAR_CONST) 
@@ -342,6 +359,10 @@ if __name__ == '__main__':
         filename_suffix = (f"fiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
                            f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
                            f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
+    elif args.pde_type == "grin_fiber":
+        filename_suffix = (f"grinfiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+                           f"strength{args.grin_strength:.2e}_"
+                           f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
     
     print(f"--- Dataset Generation: PDE Type '{args.pde_type}' (Full Input -> Truncated Output, with Full True Output) ---")
     print(f"Filename suffix: {filename_suffix}")
@@ -352,13 +373,17 @@ if __name__ == '__main__':
     }
     waveguide_config_params = { 
         'L_domain': args.L_domain, 
-        'core_radius_factor': args.fiber_core_radius_factor, 
-        'potential_depth': args.fiber_potential_depth, 
         'evolution_time_T': args.evolution_time_T, 
         'solver_num_steps': args.solver_num_steps, 
         'hbar_val': args.hbar_val, 
         'mass_val': args.mass_val
     }
+    if args.pde_type == "step_index_fiber":
+        waveguide_config_params['core_radius_factor'] = args.fiber_core_radius_factor
+        waveguide_config_params['potential_depth'] = args.fiber_potential_depth
+    elif args.pde_type == "grin_fiber":
+        waveguide_config_params['grin_strength'] = args.grin_strength
+    
     
     filename_template = os.path.join(args.output_dir, "dataset_{pde_type}_Nin{Nin}_Nout{Nout}_{suffix}.npz")
 
