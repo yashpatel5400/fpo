@@ -59,7 +59,7 @@ def run_single_calibration_pipeline(params_tuple):
     time.sleep(np.random.uniform(0, 0.1)) 
     log_prefix = f"[Worker {os.getpid()} Exp {exp_idx+1}/{total_exps_for_current_config_set} " \
                  f"GRF_A={args.grf_alpha:.1f}, K_SNN_Out={k_snn_output_res}] "
-    print(f"{log_prefix}Processing...")
+    print(f"{log_prefix}Processing configuration...")
 
     dataset_filename = f"dataset_{args.pde_type}_Nin{args.n_grid_sim_input_ds}_Nout{k_snn_output_res}_{filename_suffix_for_run_arg}.npz"
     dataset_full_path = os.path.join(args.dataset_dir, dataset_filename)
@@ -83,7 +83,8 @@ def run_single_calibration_pipeline(params_tuple):
     if not args.skip_data_gen or not os.path.exists(dataset_full_path):
         print(f"{log_prefix}Generating dataset: {dataset_filename}...")
         data_gen_args_list = args.base_sub_script_args_for_current_pde + [
-            "--num_samples", str(args.num_samples_dataset), 
+            "--num_train", str(args.num_samples_dataset), 
+            "--num_calib", str(args.num_samples_dataset), 
             "--n_grid_sim_input", str(args.n_grid_sim_input_ds), 
             "--k_psi0_limit", str(args.k_psi0_limit_dataset), 
             "--k_trunc_snn_output", str(k_snn_output_res), 
@@ -185,8 +186,8 @@ if __name__ == '__main__':
     parser.add_argument('--L_domain', type=float, default=2*np.pi)
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
     parser.add_argument('--fiber_potential_depth', type=float, default=1.0) 
-    parser.add_argument('--grin_strength', type=float, default=0.01)
-    parser.add_argument('--viscosity_nu', type=float, default=0.01)
+    parser.add_argument('--grin_strength', type=float, default=0.1)
+    parser.add_argument('--viscosity_nu', type=float, default=0.025)
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
 
@@ -319,6 +320,7 @@ if __name__ == '__main__':
                                      sharex=True, sharey=True, squeeze=False)
             axes_flat = axes.flatten()
             plot_successful_overall = False
+            legend_handles, legend_labels = None, None
 
             color_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
 
@@ -363,12 +365,20 @@ if __name__ == '__main__':
                 if i_plot % ncols_fig == 0:
                     ax.set_ylabel("Empirical Coverage")
                 ax.set_title(f"GRF $\\rho = {current_grf_alpha_plot_val:.1f}$")
-                ax.legend(fontsize='xx-small', loc='lower right')
                 ax.grid(True)
                 ax.set_xlim(0, 1)
                 ax.set_ylim(0, 1.05)
+                
+                if has_data_for_this_subplot and legend_handles is None:
+                    legend_handles, legend_labels = ax.get_legend_handles_labels()
+                
                 if not has_data_for_this_subplot:
                     ax.text(0.5,0.5,"No data",ha='center',va='center',transform=ax.transAxes)
+            
+            # Add a single legend to the last populated plot
+            if plot_successful_overall and legend_handles is not None:
+                # Place legend in the bottom right plot (last populated one)
+                axes_flat[num_alpha_plots - 1].legend(handles=legend_handles, labels=legend_labels, fontsize='medium', loc='lower right')
             
             for j_ax_hide in range(num_alpha_plots, nrows_fig * ncols_fig): 
                 if j_ax_hide < len(axes_flat):

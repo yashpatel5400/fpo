@@ -164,30 +164,14 @@ def solver_main(V_potential, psi0_real_space, N_grid, L_domain, T_evolution, num
 
 # --- Heat Equation Solver ---
 def solve_heat_equation_2d(u0, N, L, T, nu):
-    """
-    Solves the 2D heat equation using Fourier spectral method.
-    u0: Initial condition (real space).
-    N: Grid size.
-    L: Domain size.
-    T: Evolution time.
-    nu: Viscosity/diffusivity constant.
-    """
-    # 1. Go to Fourier space
     u0_hat = np.fft.fft2(u0)
-    
-    # 2. Construct k-space grid
     dx = L / N
     k_vec = 2.0 * np.pi * np.fft.fftfreq(N, d=dx)
     kx, ky = np.meshgrid(k_vec, k_vec, indexing='ij')
     k2 = kx**2 + ky**2
-    
-    # 3. Apply the Fourier space solution operator
     uT_hat = u0_hat * np.exp(-nu * k2 * T)
-    
-    # 4. Go back to real space
-    uT = np.fft.ifft2(uT_hat)
-    
-    return uT.real # Solution should be real
+    uT = np.fft.ifft2(uT_hat).real
+    return uT
 
 # --- Waveguide Potential ---
 def get_step_index_fiber_potential(N_grid, L_domain, core_radius_factor, potential_depth):
@@ -200,7 +184,6 @@ def get_step_index_fiber_potential(N_grid, L_domain, core_radius_factor, potenti
     return potential
 
 def get_grin_fiber_potential(N_grid, L_domain, grin_strength):
-    """Generates a 2D GRIN fiber potential V(x,y) = C * (x^2 + y^2)."""
     coords1d = np.linspace(-L_domain / 2.0, L_domain / 2.0, N_grid, endpoint=False)
     x_mg, y_mg = np.meshgrid(coords1d, coords1d, indexing='ij')
     rr_sq = x_mg**2 + y_mg**2
@@ -209,7 +192,6 @@ def get_grin_fiber_potential(N_grid, L_domain, grin_strength):
 
 # --- Helper Functions for Spectra ---
 def get_full_centered_spectrum(psi_real_space): 
-    """ Computes full 2D FFT and shifts it. Output is UNNORMALIZED."""
     N_grid = psi_real_space.shape[0]
     if N_grid == 0:
         return np.array([], dtype=np.complex64)
@@ -217,7 +199,6 @@ def get_full_centered_spectrum(psi_real_space):
     return F_psi_shifted
 
 def normalize_spectrum(spectrum_complex): 
-    """ Normalizes a given spectrum so sum(|coeffs|^2)=1. """
     if spectrum_complex.size == 0:
         return spectrum_complex
     norm_sq = np.sum(np.abs(spectrum_complex)**2)
@@ -226,12 +207,11 @@ def normalize_spectrum(spectrum_complex):
     return np.zeros_like(spectrum_complex)
 
 def extract_center_block(full_spectrum_centered, K_extract): 
-    """ Extracts central K_extract x K_extract block. Output is UNNORMALIZED. """
     N_full = full_spectrum_centered.shape[0]
     if K_extract == N_full:
         return full_spectrum_centered
     if K_extract > N_full:
-        raise ValueError(f"K_extract ({K_extract}) > full_spectrum size ({N_full}). Padding not implemented here, should be handled by SNN if needed.")
+        raise ValueError(f"K_extract ({K_extract}) > full_spectrum size ({N_full}). Padding not implemented here.")
     if K_extract <= 0:
         return np.array([], dtype=np.complex64)
     
@@ -244,16 +224,12 @@ def generate_snn_dataset(num_samples, N_grid_sim_input, K_psi0_band_limit,
                          K_trunc_snn_output, 
                          pde_type,
                          grf_config,     
-                         waveguide_config, 
-                         save_path_template,
-                         filename_suffix_str):
+                         waveguide_config):
     dataset_gamma_b_full_input = []
     dataset_gamma_a_snn_target = []
     dataset_gamma_a_true_full_output = [] 
     
-    print(f"Generating {num_samples} samples for SNN. PDE: {pde_type}...")
-    print(f"  Input resolution (gamma_b_full_input & gamma_a_true_full_output): {N_grid_sim_input}x{N_grid_sim_input}")
-    print(f"  SNN Target output resolution (gamma_a_snn_target): {K_trunc_snn_output}x{K_trunc_snn_output}")
+    print(f"Generating {num_samples} total samples. PDE: {pde_type}...")
 
     if pde_type in ["poisson", "step_index_fiber", "grin_fiber", "heat_equation"]:
         grf_generator = GaussianRF(dim=2, size=N_grid_sim_input, 
@@ -271,13 +247,11 @@ def generate_snn_dataset(num_samples, N_grid_sim_input, K_psi0_band_limit,
             f_sample_grf = grf_generator.sample(1).cpu().numpy().squeeze()
             f_real_with_offset = add_hierarchical_offset_2d(f_sample_grf, sigma=grf_config.get('offset_sigma', 0.5))
             initial_real_space_state_f = f_real_with_offset - np.mean(f_real_with_offset) 
-            
-            gamma_b_full_input_spec = get_full_centered_spectrum(initial_real_space_state_f) # Unnormalized spectrum of f
-
+            gamma_b_full_input_spec = get_full_centered_spectrum(initial_real_space_state_f)
             f_hat_r = np.fft.rfft2(initial_real_space_state_f)
             u_hat_r = solve_poisson_2d_rfft(f_hat_r, enforce_zero_mean=True)
             true_output_real_space_state_u = np.fft.irfft2(u_hat_r, s=initial_real_space_state_f.shape) 
-            gamma_a_true_full_spec = get_full_centered_spectrum(true_output_real_space_state_u) # Unnormalized spectrum of u
+            gamma_a_true_full_spec = get_full_centered_spectrum(true_output_real_space_state_u)
         
         elif pde_type == "step_index_fiber" or pde_type == "grin_fiber":
             initial_real_space_state_unnormalized = grf_generator.sample(1).cpu().numpy().squeeze()
@@ -316,14 +290,11 @@ def generate_snn_dataset(num_samples, N_grid_sim_input, K_psi0_band_limit,
             gamma_a_true_full_spec = normalize_spectrum(gamma_a_true_full_spec_unnorm) 
         
         elif pde_type == "heat_equation":
-            # Input is the initial condition u0
             u0 = grf_generator.sample(1).cpu().numpy().squeeze()
-            gamma_b_full_input_spec = get_full_centered_spectrum(u0) # Unnormalized spectrum of u0
-            
-            # Solution is u(T)
+            gamma_b_full_input_spec = get_full_centered_spectrum(u0)
             uT = solve_heat_equation_2d(u0, N=N_grid_sim_input, L=waveguide_config['L_domain'], 
                                         T=waveguide_config['evolution_time_T'], nu=waveguide_config['viscosity_nu'])
-            gamma_a_true_full_spec = get_full_centered_spectrum(uT) # Unnormalized spectrum of uT
+            gamma_a_true_full_spec = get_full_centered_spectrum(uT)
         else:
             raise ValueError(f"Unknown pde_type: {pde_type}")
 
@@ -337,25 +308,17 @@ def generate_snn_dataset(num_samples, N_grid_sim_input, K_psi0_band_limit,
     gamma_a_snn_target_all = np.array(dataset_gamma_a_snn_target, dtype=np.complex64)
     gamma_a_true_full_all = np.array(dataset_gamma_a_true_full_output, dtype=np.complex64)
     
-    current_save_path = save_path_template.format(Nin=N_grid_sim_input, Nout=K_trunc_snn_output, pde_type=pde_type, suffix=filename_suffix_str)
-    os.makedirs(os.path.dirname(current_save_path) or '.', exist_ok=True)
-    np.savez_compressed(current_save_path, 
-                        gamma_b_full_input=gamma_b_full_all, 
-                        gamma_a_snn_target=gamma_a_snn_target_all, 
-                        gamma_a_true_full_output=gamma_a_true_full_all) 
-    print(f"Dataset saved to {current_save_path}")
-    print(f"Shapes: gamma_b_full_input: {gamma_b_full_all.shape}, gamma_a_snn_target: {gamma_a_snn_target_all.shape}, gamma_a_true_full_output: {gamma_a_true_full_all.shape}")
-    
     return gamma_b_full_all, gamma_a_snn_target_all, gamma_a_true_full_all
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Generate dataset (Full Input -> Truncated Output, with Full True Output) for SNN training.")
+    parser = argparse.ArgumentParser(description="Generate dataset for SNN training and calibration.")
     
     # --- Core Parameters ---
     parser.add_argument('--pde_type', type=str, default="step_index_fiber", 
                         choices=["poisson", "step_index_fiber", "grin_fiber", "heat_equation"],
                         help="Type of data generation process.")
-    parser.add_argument('--num_samples', type=int, default=100) 
+    parser.add_argument('--num_train', type=int, default=100, help="Number of samples for the training set.") 
+    parser.add_argument('--num_calib', type=int, default=100, help="Number of samples for the calibration/test set.")
     parser.add_argument('--n_grid_sim_input', type=int, default=64,
                         help='Grid size for full input & full true output spectra (Nin).')
     parser.add_argument('--k_trunc_snn_output', type=int, default=32,
@@ -377,9 +340,9 @@ if __name__ == '__main__':
                         help="Core radius as fraction of L_domain/2.")
     parser.add_argument('--fiber_potential_depth', type=float, default=1.0, 
                         help="Depth V0 of the fiber potential well.")
-    parser.add_argument('--grin_strength', type=float, default=0.01,
+    parser.add_argument('--grin_strength', type=float, default=0.1,
                         help="Strength C of the GRIN fiber potential V(r) = C*r^2.")
-    parser.add_argument('--viscosity_nu', type=float, default=0.01,
+    parser.add_argument('--viscosity_nu', type=float, default=0.025,
                         help="Viscosity/diffusivity nu for the Heat Equation.")
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
@@ -404,11 +367,13 @@ if __name__ == '__main__':
                            f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
     elif args.pde_type == "heat_equation":
         filename_suffix = (f"heat_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
-                           f"nu{args.viscosity_nu:.2e}_"
-                           f"evoT{args.evolution_time_T:.1e}")
+                           f"nu{args.viscosity_nu:.2e}_evoT{args.evolution_time_T:.1e}")
     
-    print(f"--- Dataset Generation: PDE Type '{args.pde_type}' (Full Input -> Truncated Output, with Full True Output) ---")
-    print(f"Filename suffix: {filename_suffix}")
+    print(f"--- Generating dataset for PDE Type '{args.pde_type}' ---")
+    print(f"  Training samples: {args.num_train}, Calibration samples: {args.num_calib}")
+    print(f"  Filename suffix: {filename_suffix}")
+
+    total_samples = args.num_train + args.num_calib
 
     grf_config_for_input = { 
         'alpha': args.grf_alpha, 'tau': args.grf_tau, 
@@ -426,25 +391,49 @@ if __name__ == '__main__':
         'viscosity_nu': args.viscosity_nu
     }
     
-    filename_template = os.path.join(args.output_dir, "dataset_{pde_type}_Nin{Nin}_Nout{Nout}_{suffix}.npz")
-
-    gamma_b_data, gamma_a_snn_target_data, gamma_a_true_full_data = generate_snn_dataset(
-        args.num_samples, args.n_grid_sim_input, args.k_psi0_limit,
+    gamma_b_all, gamma_a_target_all, gamma_a_true_all = generate_snn_dataset(
+        total_samples, args.n_grid_sim_input, args.k_psi0_limit,
         args.k_trunc_snn_output, 
         args.pde_type,
         grf_config_for_input, 
-        waveguide_config_params,
-        save_path_template=filename_template,
-        filename_suffix_str=filename_suffix
+        waveguide_config_params
     )
+    
+    # Split the generated data into train and calib sets
+    gamma_b_train = gamma_b_all[:args.num_train]
+    gamma_b_calib = gamma_b_all[args.num_train:]
+    
+    gamma_a_snn_target_train = gamma_a_target_all[:args.num_train]
+    gamma_a_snn_target_calib = gamma_a_target_all[args.num_train:]
+    
+    gamma_a_true_full_train = gamma_a_true_all[:args.num_train]
+    gamma_a_true_full_calib = gamma_a_true_all[args.num_train:]
 
-    if args.num_samples > 0 and gamma_b_data.size > 0:
-        sample_idx = 0
-        gb_full_sample_spec = gamma_b_data[sample_idx]
-        ga_snn_target_sample_spec = gamma_a_snn_target_data[sample_idx]
-        ga_true_full_sample_spec = gamma_a_true_full_data[sample_idx]
+    # Save to a single npz file with multiple fields
+    filename_template = os.path.join(args.output_dir, "dataset_{pde_type}_Nin{Nin}_Nout{Nout}_{suffix}.npz")
+    save_path = filename_template.format(pde_type=args.pde_type, Nin=args.n_grid_sim_input, Nout=args.k_trunc_snn_output, suffix=filename_suffix)
+    os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
+    
+    np.savez_compressed(save_path, 
+                        gamma_b_train=gamma_b_train, 
+                        gamma_b_calib=gamma_b_calib,
+                        gamma_a_snn_target_train=gamma_a_snn_target_train,
+                        gamma_a_snn_target_calib=gamma_a_snn_target_calib,
+                        gamma_a_true_full_train=gamma_a_true_full_train,
+                        gamma_a_true_full_calib=gamma_a_true_full_calib)
+    
+    print(f"\nDataset saved to {save_path}")
+    print(f"  Train shapes: gamma_b: {gamma_b_train.shape}, gamma_a_target: {gamma_a_snn_target_train.shape}, gamma_a_true: {gamma_a_true_full_train.shape}")
+    print(f"  Calib shapes: gamma_b: {gamma_b_calib.shape}, gamma_a_target: {gamma_a_snn_target_calib.shape}, gamma_a_true: {gamma_a_true_full_calib.shape}")
 
-        # --- Spectral Domain Visualization ---
+
+    if total_samples > 0:
+        sample_idx = 0 # Visualize first sample of the training set
+        gb_full_sample_spec = gamma_b_train[sample_idx]
+        ga_snn_target_sample_spec = gamma_a_snn_target_train[sample_idx]
+        ga_true_full_sample_spec = gamma_a_true_full_train[sample_idx]
+
+        # --- Visualization (identical to before, just using the train split data) ---
         fig_spec, axes_spec = plt.subplots(1, 3, figsize=(18, 5)) 
         im0_spec = axes_spec[0].imshow(np.abs(gb_full_sample_spec))
         axes_spec[0].set_title(f"Input $\gamma_b$ Spectrum ($N_{{in}}={args.n_grid_sim_input}$)")
@@ -467,7 +456,6 @@ if __name__ == '__main__':
         print(f"\nSample SNN spectra visualization saved to {save_fig_path_spec}")
         plt.close(fig_spec) 
 
-        # --- Spatial Domain Visualization ---
         psi_b_real_vis = np.fft.ifft2(np.fft.ifftshift(gb_full_sample_spec))
         psi_a_true_full_spatial_vis = np.fft.ifft2(np.fft.ifftshift(ga_true_full_sample_spec))
         
@@ -501,3 +489,5 @@ if __name__ == '__main__':
         plt.close(fig_spatial)
     else:
         print("No samples generated or data is empty, skipping visualization.")
+
+    print("\nDataset generation script finished.")

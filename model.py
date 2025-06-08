@@ -88,19 +88,20 @@ def load_and_prepare_dataloaders(dataset_path,
                                  batch_size, val_split=0.2, random_seed=42):
     try:
         data = np.load(dataset_path)
-        gamma_b_full_all = data['gamma_b_full_input'] 
-        gamma_a_truncated_target_all = data['gamma_a_snn_target'] 
+        gamma_b_full_all = data['gamma_b_train'] 
+        gamma_a_truncated_target_all = data['gamma_a_snn_target_train'] 
     except FileNotFoundError:
         print(f"Error: Dataset file not found at {dataset_path}")
         return None, None, False 
     except KeyError as e:
-        print(f"Error: Dataset file {dataset_path} missing expected key: {e}")
+        print(f"Error: Dataset file {dataset_path} missing expected key for training: {e}")
+        print("Please ensure the dataset was generated with the updated data.py script.")
         return None, None, False
 
     if gamma_b_full_all.ndim < 3 or gamma_b_full_all.shape[1] != snn_input_res_expected:
-        raise ValueError(f"Dataset's gamma_b_full_input res ({gamma_b_full_all.shape[1]}) != expected SNN input res ({snn_input_res_expected}).")
+        raise ValueError(f"Dataset's gamma_b_train res ({gamma_b_full_all.shape[1]}) != expected SNN input res ({snn_input_res_expected}).")
     if gamma_a_truncated_target_all.ndim < 3 or gamma_a_truncated_target_all.shape[1] != snn_target_res_expected:
-        raise ValueError(f"Dataset's gamma_a_snn_target res ({gamma_a_truncated_target_all.shape[1]}) != expected SNN target res ({snn_target_res_expected}).")
+        raise ValueError(f"Dataset's gamma_a_snn_target_train res ({gamma_a_truncated_target_all.shape[1]}) != expected SNN target res ({snn_target_res_expected}).")
 
     dataset = SNNFullInputDataset(gamma_b_full_all, gamma_a_truncated_target_all)
     num_samples = len(dataset)
@@ -124,7 +125,7 @@ def load_and_prepare_dataloaders(dataset_path,
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0) if has_val_data else None
     
-    print(f"Dataset loaded: {num_samples} total samples. Training: {len(train_dataset)}, Validation: {len(val_dataset) if val_dataset else 0}.")
+    print(f"Dataset loaded: {num_samples} total training samples. Splitting into Training: {len(train_dataset)}, Validation: {len(val_dataset) if val_dataset else 0}.")
     return train_loader, val_loader, has_val_data
 
 # --- Training Loop ---
@@ -256,6 +257,7 @@ if __name__ == '__main__':
                            f"nu{args.viscosity_nu:.2e}_"
                            f"evoT{args.evolution_time_T:.1e}")
     
+    # CORRECTED: Dataset filename no longer needs a type prefix
     DATASET_FILENAME = f"dataset_{args.pde_type}_Nin{args.n_grid_sim_input_ds}_Nout{args.k_snn_target_res}_{filename_suffix}.npz"
     DATASET_FILE_PATH = os.path.join(args.dataset_dir, DATASET_FILENAME)
     

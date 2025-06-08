@@ -6,8 +6,36 @@ import matplotlib.pyplot as plt
 import os
 import argparse 
 
-# --- Import SNN Model from model.py ---
-from model import SimpleSpectralOperatorCNN
+# --- SNN Model Definition (should match the one used for training) ---
+class SimpleSpectralOperatorCNN(nn.Module):
+    def __init__(self, K_input_resolution, K_output_resolution, hidden_channels=64, num_hidden_layers=3):
+        super().__init__()
+        self.K_input_resolution = K_input_resolution
+        self.K_output_resolution = K_output_resolution
+        
+        if K_output_resolution > K_input_resolution:
+            raise ValueError("K_output_resolution cannot be greater than K_input_resolution for this SNN design (cropping output).")
+        
+        layers = []
+        layers.append(nn.Conv2d(2, hidden_channels, kernel_size=3, padding='same'))
+        layers.append(nn.ReLU())
+        
+        for _ in range(num_hidden_layers):
+            layers.append(nn.Conv2d(hidden_channels, hidden_channels, kernel_size=3, padding='same'))
+            layers.append(nn.ReLU())
+            
+        layers.append(nn.Conv2d(hidden_channels, 2, kernel_size=3, padding='same'))
+        self.cnn_body = nn.Sequential(*layers)
+
+    def forward(self, x_spec_ch_full_input): # x_spec_ch_full_input: (batch, 2, K_input, K_input)
+        x_processed_full = self.cnn_body(x_spec_ch_full_input) # Output: (batch, 2, K_input, K_input)
+        
+        if self.K_input_resolution == self.K_output_resolution:
+            return x_processed_full
+        else: 
+            start_idx = self.K_input_resolution // 2 - self.K_output_resolution // 2
+            end_idx = start_idx + self.K_output_resolution
+            return x_processed_full[:, :, start_idx:end_idx, start_idx:end_idx]
 
 # --- Data Handling ---
 def spectrum_complex_to_channels_torch(spectrum_mat_complex):
@@ -115,7 +143,7 @@ if __name__ == '__main__':
     parser.add_argument('--grf_offset_sigma', type=float, default=0.5)
     parser.add_argument('--L_domain', type=float, default=2*np.pi) 
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
-    parser.add_argument('--fiber_potential_depth', type=float, default=1.0) 
+    parser.add_argument('--fiber_potential_depth', type=float, default=1.0)
     parser.add_argument('--grin_strength', type=float, default=0.1)
     parser.add_argument('--viscosity_nu', type=float, default=0.01)
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
@@ -155,6 +183,7 @@ if __name__ == '__main__':
     else: SNN_MODEL_FILENAME = f"snn_PDE{args.pde_type}_Kin{snn_input_res_val}_Kout{snn_output_res_val}_H{args.snn_hidden_channels}_L{args.snn_num_hidden_layers}_{filename_suffix}.pth"
     SNN_MODEL_PATH = os.path.join(args.snn_model_dir, SNN_MODEL_FILENAME)
     
+    # This filename is now expected to contain both train and calib data
     DATASET_FILENAME = f"dataset_{args.pde_type}_Nin{args.n_grid_sim_input_ds}_Nout{args.snn_output_res}_{filename_suffix}.npz"
     DATASET_FILE_PATH = os.path.join(args.dataset_dir, DATASET_FILENAME)
     
@@ -188,22 +217,25 @@ if __name__ == '__main__':
     
     try:
         data = np.load(DATASET_FILE_PATH)
-        gamma_b_full_all = data['gamma_b_full_input']         
-        gamma_a_snn_target_all = data['gamma_a_snn_target'] 
-        gamma_a_true_full_all = data['gamma_a_true_full_output'] 
+        # CORRECTED: Load the '_calib' arrays for calibration and testing
+        gamma_b_full_all = data['gamma_b_calib']         
+        gamma_a_snn_target_all = data['gamma_a_snn_target_calib'] 
+        gamma_a_true_full_all = data['gamma_a_true_full_calib'] 
     except Exception as e:
-        print(f"Error loading dataset {DATASET_FILE_PATH}: {e}")
+        print(f"Error loading calibration dataset {DATASET_FILE_PATH}: {e}")
+        print("Please ensure the dataset was generated with the updated data.py script.")
         exit()
     
     if not (gamma_b_full_all.ndim > 2 and gamma_b_full_all.shape[1] == args.n_grid_sim_input_ds and \
             gamma_a_snn_target_all.ndim > 2 and gamma_a_snn_target_all.shape[1] == args.snn_output_res and \
             gamma_a_true_full_all.ndim > 2 and gamma_a_true_full_all.shape[1] == args.n_grid_sim_input_ds):
-        print(f"Error: Loaded dataset dimensions mismatch with script arguments or expected structure.")
+        print(f"Error: Loaded calibration dataset dimensions mismatch with script arguments or expected structure.")
         exit()
     if N_full_for_theorem < snn_output_res_val : 
         print(f"Error: N_full_for_theorem ({N_full_for_theorem}) must be >= SNN output res ({snn_output_res_val}).")
         exit()
     
+    # We now split the loaded calibration data into a calibration set and a test set
     num_total_samples = gamma_b_full_all.shape[0]
     indices = np.arange(num_total_samples)
     if not (0 < args.calib_split_ratio < 1):
@@ -212,18 +244,23 @@ if __name__ == '__main__':
     if int(num_total_samples * test_size_float) < 1 and num_total_samples > 1:
         test_size_float = 1.0 / num_total_samples
     if int(num_total_samples * (1-test_size_float)) < 1 :
-        print("Error: Not enough samples for calibration.")
+        print("Error: Not enough samples for calibration split.")
         exit()
         
     cal_indices, test_indices = train_test_split(indices, test_size=test_size_float, random_state=args.random_seed, shuffle=True)
+    
     gamma_b_full_cal = gamma_b_full_all[cal_indices]
-    gamma_a_snn_target_cal = gamma_a_snn_target_all[cal_indices] 
+    gamma_a_snn_target_cal = gamma_a_snn_target_all[cal_indices]
+    
     gamma_b_full_test = gamma_b_full_all[test_indices]
     gamma_a_true_full_test = gamma_a_true_full_all[test_indices] 
     
-    print(f"Cal set: {len(gamma_b_full_cal)}, Test set: {len(gamma_b_full_test)}")
+    print(f"Splitting loaded calibration data ({num_total_samples} samples) into:")
+    print(f"  New Calibration set: {len(gamma_b_full_cal)}")
+    print(f"  New Test set: {len(gamma_b_full_test)}")
+
     if not (len(gamma_b_full_cal) > 0 and len(gamma_b_full_test) > 0):
-        print("Error: Cal or test set empty.")
+        print("Error: Cal or test set empty after splitting.")
         exit()
 
     nonconformity_scores_cal = [] 
@@ -262,7 +299,7 @@ if __name__ == '__main__':
     weights_source_Hs_Nfull = None
     if args.pde_type == "poisson":
         _, weights_source_Hs_minus_2_Nfull = get_mode_indices_and_weights(N_full_for_theorem, args.d_dimensions, args.s_theorem - 2, 0)
-    elif args.pde_type == "step_index_fiber" or args.pde_type == "grin_fiber" or args.pde_type == "heat_equation":
+    if args.pde_type in ["step_index_fiber", "grin_fiber", "heat_equation"]:
         _, weights_source_Hs_Nfull = get_mode_indices_and_weights(N_full_for_theorem, args.d_dimensions, args.s_theorem, 0)
 
     print("\nCalculating empirical coverage on test set...")
@@ -292,7 +329,7 @@ if __name__ == '__main__':
                         norm_source_Hsm2_sq = np.sum(weights_source_Hs_minus_2_Nfull * np.abs(source_coeffs_Nfull)**2)
                         B_value_this_sample = args.elliptic_PDE_const_C_sq * norm_source_Hsm2_sq
                     else: 
-                        B_value_this_sample = 1.0 
+                        B_value_this_sample = 1.0
                         if N_full_for_theorem > 0 :
                              print(f"Warning: weights_source_Hs_minus_2_Nfull for Poisson B_value calculation is empty/problematic. Using fallback B=1.0.")
                 elif args.pde_type == "step_index_fiber" or args.pde_type == "grin_fiber":
@@ -304,28 +341,19 @@ if __name__ == '__main__':
                             V_inf = args.fiber_potential_depth
                         elif args.pde_type == "grin_fiber":
                             V_inf = args.grin_strength * (args.L_domain**2 / 2.0)
-                        factor_V0_s_corrected = (np.max([2, (1 + 2 * V_inf**2)]))**args.s_theorem
+                        factor_V0_s_corrected = (np.sqrt(2) * np.max([2, (1 + 2 * V_inf**2)]))**args.s_theorem
                         B_value_this_sample = factor_V0_s_corrected * norm_input_Hs_sq
                     else:
                         B_value_this_sample = 1.0 
                         if N_full_for_theorem > 0 :
                             print(f"Warning: weights_source_Hs_Nfull for Fiber B_value calculation is empty/problematic. Using fallback B=1.0.")
                 elif args.pde_type == "heat_equation":
-                     # For heat equation, B is C * ||u0||_H^{s-2}, where C depends on nu and T
                     input_state_coeffs_Nfull = gb_full_test_complex
-                    _, weights_source_Hs_minus_2 = get_mode_indices_and_weights(N_full_for_theorem, args.d_dimensions, args.s_theorem, 0)
-                    norm_input_Hsm2_sq = np.sum(weights_source_Hs_minus_2 * np.abs(input_state_coeffs_Nfull)**2)
-                    
-                    # Calculate C^2 for ||uT||_H^s <= C ||u0||_H^{s-2}
-                    s2 = args.s_theorem
-                    s1 = args.s_theorem
-                    nuT = args.viscosity_nu * args.evolution_time_T
-                    if nuT > 0:
-                        x_max = max(0, (s2 - s1) / (2 * nuT) - 1 / (2*nuT)) # Simplified from derivative
-                        C_sq = ((1 + x_max)**(s2 - s1)) / np.exp(2 * nuT * x_max)
+                    if weights_source_Hs_Nfull is not None and weights_source_Hs_Nfull.size > 0:
+                        norm_input_Hs_sq = np.sum(weights_source_Hs_Nfull * np.abs(input_state_coeffs_Nfull)**2)
+                        B_value_this_sample = norm_input_Hs_sq
                     else:
-                        C_sq = 1.0 # If nu*T = 0, uT=u0, so norm is preserved for s2=s1
-                    B_value_this_sample = C_sq * norm_input_Hsm2_sq
+                        B_value_this_sample = 1.0
                 else: 
                     print(f"Warning: Unknown PDE type '{args.pde_type}' for B_value calculation. Using B=1.0.")
                     B_value_this_sample = 1.0 
@@ -335,7 +363,7 @@ if __name__ == '__main__':
                     correction_term_this_sample = B_value_this_sample 
                 else: 
                     if snn_output_res_val > 0: 
-                        scaling_factor = (snn_output_res_val**(-2 * args.nu_theorem)) 
+                        scaling_factor = (args.d_dimensions * snn_output_res_val**2)**(-args.nu_theorem)
                         correction_term_this_sample = B_value_this_sample * scaling_factor
                     else: 
                         correction_term_this_sample = float('inf') if B_value_this_sample > 1e-9 else 0.0
