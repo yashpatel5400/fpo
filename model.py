@@ -198,7 +198,7 @@ if __name__ == '__main__':
     
     # --- PDE Type and Dataset Parameters ---
     parser.add_argument('--pde_type', type=str, default="step_index_fiber", 
-                        choices=["poisson", "step_index_fiber", "grin_fiber"],
+                        choices=["poisson", "step_index_fiber", "grin_fiber", "heat_equation"],
                         help="Type of data generation process the dataset corresponds to.")
     parser.add_argument('--n_grid_sim_input_ds', type=int, default=64, 
                         help='Nin: Resolution of gamma_b_full_input in dataset. SNN will take this as input resolution.')
@@ -229,7 +229,8 @@ if __name__ == '__main__':
     parser.add_argument('--L_domain', type=float, default=2*np.pi) 
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
     parser.add_argument('--fiber_potential_depth', type=float, default=1.0)
-    parser.add_argument('--grin_strength', type=float, default=0.01, help="Strength for GRIN fiber potential.")
+    parser.add_argument('--grin_strength', type=float, default=0.1)
+    parser.add_argument('--viscosity_nu', type=float, default=0.01)
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
     
@@ -250,6 +251,10 @@ if __name__ == '__main__':
         filename_suffix = (f"grinfiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
                            f"strength{args.grin_strength:.2e}_"
                            f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
+    elif args.pde_type == "heat_equation":
+        filename_suffix = (f"heat_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+                           f"nu{args.viscosity_nu:.2e}_"
+                           f"evoT{args.evolution_time_T:.1e}")
     
     DATASET_FILENAME = f"dataset_{args.pde_type}_Nin{args.n_grid_sim_input_ds}_Nout{args.k_snn_target_res}_{filename_suffix}.npz"
     DATASET_FILE_PATH = os.path.join(args.dataset_dir, DATASET_FILENAME)

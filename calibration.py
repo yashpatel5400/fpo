@@ -88,7 +88,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Conformal Prediction for SNN Error (Theorem Validation).")
     
     # --- PDE Type and Dataset Parameters ---
-    parser.add_argument('--pde_type', type=str, default="step_index_fiber", choices=["poisson", "step_index_fiber", "grin_fiber"])
+    parser.add_argument('--pde_type', type=str, default="step_index_fiber", choices=["poisson", "step_index_fiber", "grin_fiber", "heat_equation"])
     parser.add_argument('--n_grid_sim_input_ds', type=int, default=64)
     parser.add_argument('--snn_output_res', type=int, default=32)
     parser.add_argument('--dataset_dir', type=str, default="datasets")
@@ -116,7 +116,8 @@ if __name__ == '__main__':
     parser.add_argument('--L_domain', type=float, default=2*np.pi) 
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
     parser.add_argument('--fiber_potential_depth', type=float, default=1.0) 
-    parser.add_argument('--grin_strength', type=float, default=0.01)
+    parser.add_argument('--grin_strength', type=float, default=0.1)
+    parser.add_argument('--viscosity_nu', type=float, default=0.01)
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
     
@@ -145,6 +146,9 @@ if __name__ == '__main__':
         filename_suffix = (f"grinfiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
                            f"strength{args.grin_strength:.2e}_"
                            f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
+    elif args.pde_type == "heat_equation":
+        filename_suffix = (f"heat_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+                           f"nu{args.viscosity_nu:.2e}_evoT{args.evolution_time_T:.1e}")
 
     
     if args.snn_model_filename_override: SNN_MODEL_FILENAME = args.snn_model_filename_override
@@ -258,7 +262,7 @@ if __name__ == '__main__':
     weights_source_Hs_Nfull = None
     if args.pde_type == "poisson":
         _, weights_source_Hs_minus_2_Nfull = get_mode_indices_and_weights(N_full_for_theorem, args.d_dimensions, args.s_theorem - 2, 0)
-    if args.pde_type == "step_index_fiber" or args.pde_type == "grin_fiber":
+    elif args.pde_type == "step_index_fiber" or args.pde_type == "grin_fiber" or args.pde_type == "heat_equation":
         _, weights_source_Hs_Nfull = get_mode_indices_and_weights(N_full_for_theorem, args.d_dimensions, args.s_theorem, 0)
 
     print("\nCalculating empirical coverage on test set...")
@@ -306,6 +310,22 @@ if __name__ == '__main__':
                         B_value_this_sample = 1.0 
                         if N_full_for_theorem > 0 :
                             print(f"Warning: weights_source_Hs_Nfull for Fiber B_value calculation is empty/problematic. Using fallback B=1.0.")
+                elif args.pde_type == "heat_equation":
+                     # For heat equation, B is C * ||u0||_H^{s-2}, where C depends on nu and T
+                    input_state_coeffs_Nfull = gb_full_test_complex
+                    _, weights_source_Hs_minus_2 = get_mode_indices_and_weights(N_full_for_theorem, args.d_dimensions, args.s_theorem, 0)
+                    norm_input_Hsm2_sq = np.sum(weights_source_Hs_minus_2 * np.abs(input_state_coeffs_Nfull)**2)
+                    
+                    # Calculate C^2 for ||uT||_H^s <= C ||u0||_H^{s-2}
+                    s2 = args.s_theorem
+                    s1 = args.s_theorem
+                    nuT = args.viscosity_nu * args.evolution_time_T
+                    if nuT > 0:
+                        x_max = max(0, (s2 - s1) / (2 * nuT) - 1 / (2*nuT)) # Simplified from derivative
+                        C_sq = ((1 + x_max)**(s2 - s1)) / np.exp(2 * nuT * x_max)
+                    else:
+                        C_sq = 1.0 # If nu*T = 0, uT=u0, so norm is preserved for s2=s1
+                    B_value_this_sample = C_sq * norm_input_Hsm2_sq
                 else: 
                     print(f"Warning: Unknown PDE type '{args.pde_type}' for B_value calculation. Using B=1.0.")
                     B_value_this_sample = 1.0 
@@ -315,7 +335,7 @@ if __name__ == '__main__':
                     correction_term_this_sample = B_value_this_sample 
                 else: 
                     if snn_output_res_val > 0: 
-                        scaling_factor = ((snn_output_res_val // 2 * args.d_dimensions)**(-2 * args.nu_theorem)) 
+                        scaling_factor = (snn_output_res_val**(-2 * args.nu_theorem)) 
                         correction_term_this_sample = B_value_this_sample * scaling_factor
                     else: 
                         correction_term_this_sample = float('inf') if B_value_this_sample > 1e-9 else 0.0
@@ -373,6 +393,9 @@ if __name__ == '__main__':
         
         factor_for_B = (np.max([2, (1 + 2 * V_inf_for_str**2)]))**args.s_theorem
         save_B_info_str = f"Fiber_Vinf_{V_inf_for_str:.2e}_s_{args.s_theorem}_factor_{factor_for_B:.2e}"
+    elif args.pde_type == "heat_equation":
+        save_B_info_str = f"HeatEq_nu_{args.viscosity_nu:.2e}_T_{args.evolution_time_T:.1e}"
+
 
     if not np.isclose(args.nu_theorem, 0.0):
              save_B_info_str += f"_scaled_by_NmaxNu"

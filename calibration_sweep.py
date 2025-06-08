@@ -1,57 +1,60 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-import subprocess # To call other scripts
+import subprocess
 import argparse
 from itertools import product
-import multiprocessing # For parallel execution
-import time # For adding small delay to print statements
+import multiprocessing
+import time
+import json
 
 def run_script(script_name, args_list, log_prefix=""):
     """Helper function to run a python script with arguments."""
-    command = ["python", script_name] + args_list
-    max_print_len = 2500 
+    command = ["python", script_name] + [str(arg) for arg in args_list]
+    max_print_len = 2500
     command_str = ' '.join(command)
     if len(command_str) > max_print_len:
         command_str = command_str[:max_print_len-3] + "..."
+    
     print(f"{log_prefix}Executing: {command_str}")
     try:
-        process = subprocess.run(command, check=True, capture_output=True, text=True, timeout=7200) 
+        process = subprocess.run(command, check=True, capture_output=True, text=True, timeout=10800) # 3-hour timeout
         if process.stderr:
-            if "error" in process.stderr.lower() or \
-               "traceback" in process.stderr.lower() or \
-               "warning" in process.stderr.lower(): 
-                print(f"{log_prefix}Stderr from {script_name} (first 500 chars):")
-                print(process.stderr[:500])
+            stderr_lower = process.stderr.lower()
+            if "error" in stderr_lower or "traceback" in stderr_lower or "warning" in stderr_lower:
+                print(f"{log_prefix}Stderr from {script_name} (may indicate issues):")
+                print(process.stderr[:1000])
         return True
     except subprocess.CalledProcessError as e:
         print(f"{log_prefix}Error running {script_name}:")
         print(f"  Return code: {e.returncode}")
-        print(f"  Stdout: {e.stdout}") 
-        print(f"  Stderr: {e.stderr}") 
+        print(f"  Stdout:\n{e.stdout}") 
+        print(f"  Stderr:\n{e.stderr}") 
         return False
     except FileNotFoundError:
-        print(f"{log_prefix}Error: Script {script_name} not found.")
+        print(f"{log_prefix}Error: Script {script_name} not found. Check paths.")
         return False
     except subprocess.TimeoutExpired as e:
-        stdout_decoded = e.stdout.decode(errors='ignore') if e.stdout else 'None'
-        stderr_decoded = e.stderr.decode(errors='ignore') if e.stderr else 'None'
+        stdout_decoded = e.stdout.decode(errors='ignore') if e.stdout else 'Timeout: No stdout'
+        stderr_decoded = e.stderr.decode(errors='ignore') if e.stderr else 'Timeout: No stderr'
         print(f"{log_prefix}Error: Script {script_name} timed out after {e.timeout} seconds.")
-        print(f"  Stdout: {stdout_decoded}") 
-        print(f"  Stderr: {stderr_decoded}") 
+        print(f"  Stdout:\n{stdout_decoded}") 
+        print(f"  Stderr:\n{stderr_decoded}") 
+        return False
+    except Exception as ex:
+        print(f"{log_prefix}An unexpected error occurred while trying to run {script_name}: {ex}")
         return False
 
 def run_single_calibration_pipeline(params_tuple):
     """
     Worker function for multiprocessing. Runs data gen, SNN train, and calibration.
-    k_bound (for B0 factor) is now fixed via args.k_trunc_bound_b0_factor from the args_namespace_obj.
     """
     k_snn_output_res, args_namespace_obj, filename_suffix_for_run_arg, \
     data_gen_script, snn_train_script, conformal_calib_script, \
     exp_idx, total_exps_for_current_config_set = params_tuple
     
     args = argparse.Namespace(**vars(args_namespace_obj)) 
-    args.grf_alpha = args_namespace_obj.grf_alpha # Ensure current grf_alpha is used
+    args.grf_alpha = args_namespace_obj.grf_alpha
 
     time.sleep(np.random.uniform(0, 0.1)) 
     log_prefix = f"[Worker {os.getpid()} Exp {exp_idx+1}/{total_exps_for_current_config_set} " \
@@ -66,7 +69,6 @@ def run_single_calibration_pipeline(params_tuple):
     
     snn_training_plot_dir = os.path.join(args.results_dir_sweep_plots, f"snn_training_PDE{args.pde_type}_Kin{args.n_grid_sim_input_ds}_Kout{k_snn_output_res}_{filename_suffix_for_run_arg}")
 
-    # Filenames for calibration script use the fixed k_bound_b0_for_naming
     calib_results_subdir_name = (f"PDE{args.pde_type}_NinDS{args.n_grid_sim_input_ds}_SNNres{k_snn_output_res}_"
                                  f"KfullThm{args.n_grid_sim_input_ds}_s{args.theorem_s}_nu{args.theorem_nu}_{filename_suffix_for_run_arg}")
     calib_results_subdir = os.path.join(args.results_dir_calib_base, calib_results_subdir_name)
@@ -138,7 +140,6 @@ def run_single_calibration_pipeline(params_tuple):
     
     try:
         coverage_data = np.load(coverage_data_filename_npz)
-        # Key no longer includes k_bound as a separate swept parameter.
         result_key = (k_snn_output_res, args.pde_type, args.grf_alpha, filename_suffix_for_run_arg)
         print(f"{log_prefix}Successfully processed results for key: {result_key}")
         return result_key, { 
@@ -154,18 +155,15 @@ def run_single_calibration_pipeline(params_tuple):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Sweep for conformal calibration: SNN Output Res and GRF Alpha.")
     
-    # --- PDE Type ---
     parser.add_argument('--pde_type', type=str, default="step_index_fiber", 
-                        choices=["poisson", "step_index_fiber", "grin_fiber"], 
+                        choices=["poisson", "step_index_fiber", "grin_fiber", "heat_equation"], 
                         help="Type of data generation process for the dataset.")
     
-    # --- Sweep Parameters ---
     parser.add_argument('--k_snn_output_res_values', nargs='+', type=int, default=[32, 48],
                         help='List of SNN output resolutions to sweep over.')
     parser.add_argument('--grf_alpha_values', nargs='+', type=float, default=[2.5, 4.0],
                         help="List of GRF alpha values to sweep over.")
     
-    # --- Fixed Parameters for Dataset and SNN Structure ---
     parser.add_argument('--n_grid_sim_input_ds', type=int, default=64,
                         help='Resolution for full input spectrum (Nin) in dataset generation AND N_full for theorem evaluation.')
     parser.add_argument('--num_samples_dataset', type=int, default=200) 
@@ -176,25 +174,22 @@ if __name__ == '__main__':
     parser.add_argument('--snn_hidden_channels', type=int, default=64)
     parser.add_argument('--snn_num_hidden_layers', type=int, default=3)
 
-    # --- Fixed Theorem Parameters ---
     parser.add_argument('--theorem_s', type=float, default=2.0)
     parser.add_argument('--theorem_nu', type=float, default=2.0) 
     parser.add_argument('--theorem_d', type=int, default=2)
     parser.add_argument('--elliptic_PDE_const_C_sq', type=float, default=4.0)
 
-    # --- GRF Parameters ---
     parser.add_argument('--grf_tau', type=float, default=1.0)   
     parser.add_argument('--grf_offset_sigma', type=float, default=0.5)
 
-    # --- Step-Index & GRIN Fiber Parameters ---
     parser.add_argument('--L_domain', type=float, default=2*np.pi)
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
     parser.add_argument('--fiber_potential_depth', type=float, default=1.0) 
     parser.add_argument('--grin_strength', type=float, default=0.01)
+    parser.add_argument('--viscosity_nu', type=float, default=0.01)
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
 
-    # --- Directories and Control Flags ---
     parser.add_argument('--dataset_dir', type=str, default="datasets_sweep_final_v3")
     parser.add_argument('--model_dir', type=str, default="trained_snn_models_sweep_final_v3")
     parser.add_argument('--results_dir_calib_base', type=str, default="results_conformal_validation_sweep_final_v3")
@@ -261,6 +256,16 @@ if __name__ == '__main__':
                 "--grin_strength", str(current_iter_args.grin_strength),
                 "--evolution_time_T", str(current_iter_args.evolution_time_T),
                 "--solver_num_steps", str(current_iter_args.solver_num_steps), 
+                "--grf_alpha", str(current_iter_args.grf_alpha), 
+                "--grf_tau", str(current_iter_args.grf_tau)
+            ])
+        elif current_iter_args.pde_type == "heat_equation":
+            current_filename_suffix = (f"heat_GRFinA{current_iter_args.grf_alpha:.1f}T{current_iter_args.grf_tau:.1f}_"
+                                       f"nu{current_iter_args.viscosity_nu:.2e}_evoT{current_iter_args.evolution_time_T:.1e}")
+            current_base_sub_script_args.extend([
+                "--L_domain", str(current_iter_args.L_domain),
+                "--viscosity_nu", str(current_iter_args.viscosity_nu),
+                "--evolution_time_T", str(current_iter_args.evolution_time_T),
                 "--grf_alpha", str(current_iter_args.grf_alpha), 
                 "--grf_tau", str(current_iter_args.grf_tau)
             ])
@@ -332,19 +337,17 @@ if __name__ == '__main__':
                      plot_iter_filename_suffix = (f"grinfiber_GRFinA{current_grf_alpha_plot_val:.1f}T{args.grf_tau:.1f}_"
                                                f"strength{args.grin_strength:.2e}_"
                                                f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
-
+                elif args.pde_type == "heat_equation":
+                    plot_iter_filename_suffix = (f"heat_GRFinA{current_grf_alpha_plot_val:.1f}T{args.grf_tau:.1f}_"
+                                       f"nu{args.viscosity_nu:.2e}_evoT{args.evolution_time_T:.1e}")
 
                 has_data_for_this_subplot = False
                 for i_snn, k_snn_val in enumerate(sorted(args.k_snn_output_res_values)):
-                    # Key for results_dict: (k_snn_output_res, pde_type, grf_alpha, filename_suffix_for_run_arg)
-                    # k_bound is no longer part of this key as it's fixed by k_trunc_bound_b0_factor
                     result_key_lookup = (k_snn_val, args.pde_type, current_grf_alpha_plot_val, plot_iter_filename_suffix)
                     
                     current_color = color_cycle[i_snn % len(color_cycle)]
 
                     if result_key_lookup in all_sweep_results_dict:
-                        # NOTE: code is written with "truncation" being the *number* of modes, but N_max is actually half of that
-                        # since the number of modes extends on both the positive *and* negative sides
                         data = all_sweep_results_dict[result_key_lookup]
                         ax.plot(data["nominal_coverages"], data["empirical_coverages_theorem"], 
                                 marker='o', linestyle='-', markersize=4, color=current_color,
@@ -372,7 +375,14 @@ if __name__ == '__main__':
                     fig.delaxes(axes_flat[j_ax_hide])
             
             if plot_successful_overall:
-                fig.suptitle(f"Calibration Curves With Correction Factor", fontsize=16)
+                pde_type_to_title = {
+                    "poisson": "Poisson Equation", 
+                    "step_index_fiber": "Step Index Fiber", 
+                    "grin_fiber": "GRIN Fiber", 
+                    "heat_equation": "Heat Equation",
+                }
+
+                fig.suptitle(f"Calibration Curves With Correction: {pde_type_to_title[args.pde_type]}", fontsize=16)
                 plt.tight_layout() 
                 
                 combined_plot_filename = f"calib_curves_PDE{args.pde_type}_s{args.theorem_s}_nu{args.theorem_nu}_vs_alpha.png"

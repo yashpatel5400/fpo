@@ -18,7 +18,7 @@ def run_script(script_name, args_list, log_prefix=""):
     
     print(f"{log_prefix}Executing: {command_str}")
     try:
-        process = subprocess.run(command, check=True, capture_output=True, text=True, timeout=10800) # 3-hour timeout
+        process = subprocess.run(command, check=True, capture_output=True, text=True, timeout=5*10800) # 3-hour timeout
         if process.stderr:
             stderr_lower = process.stderr.lower()
             if "error" in stderr_lower or "traceback" in stderr_lower or "warning" in stderr_lower:

@@ -162,6 +162,33 @@ def solver_main(V_potential, psi0_real_space, N_grid, L_domain, T_evolution, num
         psi_T = psi_T / norm_psi_T
     return psi_T
 
+# --- Heat Equation Solver ---
+def solve_heat_equation_2d(u0, N, L, T, nu):
+    """
+    Solves the 2D heat equation using Fourier spectral method.
+    u0: Initial condition (real space).
+    N: Grid size.
+    L: Domain size.
+    T: Evolution time.
+    nu: Viscosity/diffusivity constant.
+    """
+    # 1. Go to Fourier space
+    u0_hat = np.fft.fft2(u0)
+    
+    # 2. Construct k-space grid
+    dx = L / N
+    k_vec = 2.0 * np.pi * np.fft.fftfreq(N, d=dx)
+    kx, ky = np.meshgrid(k_vec, k_vec, indexing='ij')
+    k2 = kx**2 + ky**2
+    
+    # 3. Apply the Fourier space solution operator
+    uT_hat = u0_hat * np.exp(-nu * k2 * T)
+    
+    # 4. Go back to real space
+    uT = np.fft.ifft2(uT_hat)
+    
+    return uT.real # Solution should be real
+
 # --- Waveguide Potential ---
 def get_step_index_fiber_potential(N_grid, L_domain, core_radius_factor, potential_depth):
     actual_core_radius = core_radius_factor * (L_domain / 2.0)
@@ -228,7 +255,7 @@ def generate_snn_dataset(num_samples, N_grid_sim_input, K_psi0_band_limit,
     print(f"  Input resolution (gamma_b_full_input & gamma_a_true_full_output): {N_grid_sim_input}x{N_grid_sim_input}")
     print(f"  SNN Target output resolution (gamma_a_snn_target): {K_trunc_snn_output}x{K_trunc_snn_output}")
 
-    if pde_type in ["poisson", "step_index_fiber", "grin_fiber"]:
+    if pde_type in ["poisson", "step_index_fiber", "grin_fiber", "heat_equation"]:
         grf_generator = GaussianRF(dim=2, size=N_grid_sim_input, 
                                    alpha=grf_config['alpha'], tau=grf_config['tau'], 
                                    device=torch.device("cpu"))
@@ -287,6 +314,16 @@ def generate_snn_dataset(num_samples, N_grid_sim_input, K_psi0_band_limit,
             
             gamma_a_true_full_spec_unnorm = get_full_centered_spectrum(psi_T_real) 
             gamma_a_true_full_spec = normalize_spectrum(gamma_a_true_full_spec_unnorm) 
+        
+        elif pde_type == "heat_equation":
+            # Input is the initial condition u0
+            u0 = grf_generator.sample(1).cpu().numpy().squeeze()
+            gamma_b_full_input_spec = get_full_centered_spectrum(u0) # Unnormalized spectrum of u0
+            
+            # Solution is u(T)
+            uT = solve_heat_equation_2d(u0, N=N_grid_sim_input, L=waveguide_config['L_domain'], 
+                                        T=waveguide_config['evolution_time_T'], nu=waveguide_config['viscosity_nu'])
+            gamma_a_true_full_spec = get_full_centered_spectrum(uT) # Unnormalized spectrum of uT
         else:
             raise ValueError(f"Unknown pde_type: {pde_type}")
 
@@ -316,7 +353,7 @@ if __name__ == '__main__':
     
     # --- Core Parameters ---
     parser.add_argument('--pde_type', type=str, default="step_index_fiber", 
-                        choices=["poisson", "step_index_fiber", "grin_fiber"],
+                        choices=["poisson", "step_index_fiber", "grin_fiber", "heat_equation"],
                         help="Type of data generation process.")
     parser.add_argument('--num_samples', type=int, default=100) 
     parser.add_argument('--n_grid_sim_input', type=int, default=64,
@@ -327,13 +364,13 @@ if __name__ == '__main__':
     parser.add_argument('--k_psi0_limit', type=int, default=32,
                         help="Max k for GRF base initial state (used if pde_type is step_index_fiber or poisson with GRF).")
 
-    # --- GRF parameters (for Poisson source f, OR for step_index_fiber initial state) ---
+    # --- GRF parameters ---
     parser.add_argument('--grf_alpha', type=float, default=4.0) 
     parser.add_argument('--grf_tau', type=float, default=1.0)   
     parser.add_argument('--grf_offset_sigma', type=float, default=0.5, 
                         help="Sigma for hierarchical offset in Poisson source (f term).")
 
-    # --- Step-Index & GRIN Fiber Waveguide Parameters ---
+    # --- Fiber & Evolution Parameters ---
     parser.add_argument('--L_domain', type=float, default=2*np.pi, 
                         help="Physical domain size (e.g., 2pi for periodicity).")
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2, 
@@ -342,6 +379,8 @@ if __name__ == '__main__':
                         help="Depth V0 of the fiber potential well.")
     parser.add_argument('--grin_strength', type=float, default=0.01,
                         help="Strength C of the GRIN fiber potential V(r) = C*r^2.")
+    parser.add_argument('--viscosity_nu', type=float, default=0.01,
+                        help="Viscosity/diffusivity nu for the Heat Equation.")
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
     parser.add_argument('--hbar_val', type=float, default=HBAR_CONST) 
@@ -363,6 +402,10 @@ if __name__ == '__main__':
         filename_suffix = (f"grinfiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
                            f"strength{args.grin_strength:.2e}_"
                            f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
+    elif args.pde_type == "heat_equation":
+        filename_suffix = (f"heat_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+                           f"nu{args.viscosity_nu:.2e}_"
+                           f"evoT{args.evolution_time_T:.1e}")
     
     print(f"--- Dataset Generation: PDE Type '{args.pde_type}' (Full Input -> Truncated Output, with Full True Output) ---")
     print(f"Filename suffix: {filename_suffix}")
@@ -376,14 +419,12 @@ if __name__ == '__main__':
         'evolution_time_T': args.evolution_time_T, 
         'solver_num_steps': args.solver_num_steps, 
         'hbar_val': args.hbar_val, 
-        'mass_val': args.mass_val
+        'mass_val': args.mass_val,
+        'core_radius_factor': args.fiber_core_radius_factor, 
+        'potential_depth': args.fiber_potential_depth,
+        'grin_strength': args.grin_strength,
+        'viscosity_nu': args.viscosity_nu
     }
-    if args.pde_type == "step_index_fiber":
-        waveguide_config_params['core_radius_factor'] = args.fiber_core_radius_factor
-        waveguide_config_params['potential_depth'] = args.fiber_potential_depth
-    elif args.pde_type == "grin_fiber":
-        waveguide_config_params['grin_strength'] = args.grin_strength
-    
     
     filename_template = os.path.join(args.output_dir, "dataset_{pde_type}_Nin{Nin}_Nout{Nout}_{suffix}.npz")
 
@@ -437,20 +478,19 @@ if __name__ == '__main__':
         psi_a_snn_target_spatial_vis = np.fft.ifft2(np.fft.ifftshift(padded_target_spec))
 
         fig_spatial, axes_spatial = plt.subplots(1, 3, figsize=(18, 5))
-        plot_func_input = lambda x: x.real if args.pde_type == "poisson" else np.abs(x)
-        plot_func_output = lambda x: x.real if args.pde_type == "poisson" else np.abs(x)
+        plot_func_input = lambda x: x.real if args.pde_type in ["poisson", "heat_equation"] else np.abs(x)
+        plot_func_output = lambda x: x.real if args.pde_type in ["poisson", "heat_equation"] else np.abs(x)
         
-        # Explicitly cast to float for imshow
-        im0_spatial = axes_spatial[0].imshow(np.abs(psi_b_real_vis))
-        axes_spatial[0].set_title(f"Input $\gamma_b$ Spatial ($N_{{in}}={args.n_grid_sim_input}$)")
+        im0_spatial = axes_spatial[0].imshow(plot_func_input(psi_b_real_vis))
+        axes_spatial[0].set_title(f"Input Spatial Field ($N_{{in}}={args.n_grid_sim_input}$)")
         plt.colorbar(im0_spatial, ax=axes_spatial[0])
 
-        im1_spatial = axes_spatial[1].imshow(np.asarray(np.abs(psi_a_snn_target_spatial_vis)))
-        axes_spatial[1].set_title(f"SNN Target $\gamma_a$ Spatial (from $N_{{out}}$)")
+        im1_spatial = axes_spatial[1].imshow(plot_func_output(psi_a_snn_target_spatial_vis))
+        axes_spatial[1].set_title(f"SNN Target Spatial (from $N_{{out}}$)")
         plt.colorbar(im1_spatial, ax=axes_spatial[1])
 
-        im2_spatial = axes_spatial[2].imshow(np.asarray(np.abs(psi_a_true_full_spatial_vis)))
-        axes_spatial[2].set_title(f"True Full $\gamma_a$ Spatial ($N_{{in}}={args.n_grid_sim_input}$)")
+        im2_spatial = axes_spatial[2].imshow(plot_func_output(psi_a_true_full_spatial_vis))
+        axes_spatial[2].set_title(f"True Full Output Spatial ($N_{{in}}={args.n_grid_sim_input}$)")
         plt.colorbar(im2_spatial, ax=axes_spatial[2])
 
         fig_spatial.suptitle(f"Dataset Sample Spatial (PDE: {args.pde_type.upper()}, Params: {filename_suffix})", fontsize=14)
