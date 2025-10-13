@@ -437,19 +437,30 @@ def main():
             u_true_real = np.abs(u_true)
 
         # same RNG and same init centers for both nominal & robust to ensure comparability
-        trial_rng = np.random.default_rng(int(rng_master.integers(0, 10_000)))
-        init_centers = random_centers(N, args.K_facilities, trial_rng)
+        trial_seed = int(rng_master.integers(0, 10_000_000))
+
+        # 1) draw shared initial centers with a dedicated RNG
+        rng_init = np.random.default_rng(trial_seed)
+        init_centers = random_centers(N, args.K_facilities, rng_init)
+
+        # 2) make two *independent* RNGs with the same seed for identical proposal streams
+        rng_nom = np.random.default_rng(trial_seed + 1)
+        rng_rob = np.random.default_rng(trial_seed + 1)
 
         # NOMINAL
-        w_nom, _ = optimize(u_tilde_real, args.K_facilities, args.radius_px,
-                            nominal_obj, iters=args.iters, step_px=args.step_px,
-                            rng=trial_rng, init_centers=init_centers)
+        w_nom, _ = optimize(
+            u_tilde_real, args.K_facilities, args.radius_px,
+            nominal_obj, iters=args.iters, step_px=args.step_px,
+            rng=rng_nom, init_centers=init_centers
+        )
 
-        # ROBUST
-        w_rob, _ = optimize(u_tilde_real, args.K_facilities, args.radius_px,
-                            robust_obj, iters=args.iters, step_px=args.step_px,
-                            rng=trial_rng, init_centers=init_centers,
-                            r_radius=r_radius, s_minus_nu=s_minus_nu)
+        # ROBUST (r_radius = 0.0 makes this identical to nominal)
+        w_rob, _ = optimize(
+            u_tilde_real, args.K_facilities, args.radius_px,
+            robust_obj, iters=args.iters, step_px=args.step_px,
+            rng=rng_rob, init_centers=init_centers,
+            r_radius=0.0, s_minus_nu=s_minus_nu
+        )
 
         # evaluate both on TRUE field
         Jn = J_collect(u_true_real, disk_mask(N, w_nom, args.radius_px))
