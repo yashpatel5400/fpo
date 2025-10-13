@@ -448,19 +448,15 @@ def main():
         rng_rob = np.random.default_rng(trial_seed + 1)
 
         # NOMINAL
-        w_nom, _ = optimize(
-            u_tilde_real, args.K_facilities, args.radius_px,
-            nominal_obj, iters=args.iters, step_px=args.step_px,
-            rng=rng_nom, init_centers=init_centers
-        )
+        w_nom, _ = optimize(u_tilde_real, args.K_facilities, args.radius_px,
+                            nominal_obj, iters=args.iters, step_px=args.step_px,
+                            rng=rng_nom, init_centers=init_centers)
 
-        # ROBUST (r_radius = 0.0 makes this identical to nominal)
-        w_rob, _ = optimize(
-            u_tilde_real, args.K_facilities, args.radius_px,
-            robust_obj, iters=args.iters, step_px=args.step_px,
-            rng=rng_rob, init_centers=init_centers,
-            r_radius=0.0, s_minus_nu=s_minus_nu
-        )
+        # ROBUST
+        w_rob, _ = optimize(u_tilde_real, args.K_facilities, args.radius_px,
+                            robust_obj, iters=args.iters, step_px=args.step_px,
+                            rng=rng_rob, init_centers=init_centers,
+                            r_radius=r_radius, s_minus_nu=s_minus_nu)
 
         # evaluate both on TRUE field
         Jn = J_collect(u_true_real, disk_mask(N, w_nom, args.radius_px))
