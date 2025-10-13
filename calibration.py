@@ -143,8 +143,8 @@ if __name__ == '__main__':
     parser.add_argument('--grf_offset_sigma', type=float, default=0.5)
     parser.add_argument('--L_domain', type=float, default=2*np.pi) 
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
-    parser.add_argument('--fiber_potential_depth', type=float, default=1.0)
-    parser.add_argument('--grin_strength', type=float, default=0.1)
+    parser.add_argument('--fiber_potential_depth', type=float, default=0.5)
+    parser.add_argument('--grin_strength', type=float, default=0.01)
     parser.add_argument('--viscosity_nu', type=float, default=0.01)
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
@@ -363,7 +363,7 @@ if __name__ == '__main__':
                     correction_term_this_sample = B_value_this_sample 
                 else: 
                     if snn_output_res_val > 0: 
-                        scaling_factor = (args.d_dimensions * snn_output_res_val**2)**(-args.nu_theorem)
+                        scaling_factor = (snn_output_res_val**2)**(-args.nu_theorem)
                         correction_term_this_sample = B_value_this_sample * scaling_factor
                     else: 
                         correction_term_this_sample = float('inf') if B_value_this_sample > 1e-9 else 0.0

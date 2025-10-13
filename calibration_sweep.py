@@ -167,7 +167,7 @@ if __name__ == '__main__':
     
     parser.add_argument('--n_grid_sim_input_ds', type=int, default=64,
                         help='Resolution for full input spectrum (Nin) in dataset generation AND N_full for theorem evaluation.')
-    parser.add_argument('--num_samples_dataset', type=int, default=200) 
+    parser.add_argument('--num_samples_dataset', type=int, default=300) 
     parser.add_argument('--k_psi0_limit_dataset', type=int, default=12,
                         help="K_psi0_band_limit for GRF base initial state.")
     
@@ -185,9 +185,9 @@ if __name__ == '__main__':
 
     parser.add_argument('--L_domain', type=float, default=2*np.pi)
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
-    parser.add_argument('--fiber_potential_depth', type=float, default=1.0) 
-    parser.add_argument('--grin_strength', type=float, default=0.1)
-    parser.add_argument('--viscosity_nu', type=float, default=0.025)
+    parser.add_argument('--fiber_potential_depth', type=float, default=0.5) 
+    parser.add_argument('--grin_strength', type=float, default=0.01)
+    parser.add_argument('--viscosity_nu', type=float, default=0.01)
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
 

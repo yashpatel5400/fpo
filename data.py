@@ -338,11 +338,11 @@ if __name__ == '__main__':
                         help="Physical domain size (e.g., 2pi for periodicity).")
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2, 
                         help="Core radius as fraction of L_domain/2.")
-    parser.add_argument('--fiber_potential_depth', type=float, default=1.0, 
+    parser.add_argument('--fiber_potential_depth', type=float, default=0.5, 
                         help="Depth V0 of the fiber potential well.")
-    parser.add_argument('--grin_strength', type=float, default=0.1,
+    parser.add_argument('--grin_strength', type=float, default=0.01,
                         help="Strength C of the GRIN fiber potential V(r) = C*r^2.")
-    parser.add_argument('--viscosity_nu', type=float, default=0.025,
+    parser.add_argument('--viscosity_nu', type=float, default=0.01,
                         help="Viscosity/diffusivity nu for the Heat Equation.")
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
