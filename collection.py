@@ -56,11 +56,22 @@ def spec_to_spatial_centered(full_centered):
     return np.fft.ifft2(np.fft.ifftshift(full_centered))
 
 # ---------- geometry & objective ----------
-def disk_mask(N, centers, radius_px):
+def disk_mask_torus(N, centers, radius_px):
+    """
+    Boolean mask for a union of K disks on a torus (periodic boundary).
+    Centers are (y, x) integer pixel coords in [0, N-1].
+    """
     yy, xx = np.meshgrid(np.arange(N), np.arange(N), indexing='ij')
     mask = np.zeros((N, N), dtype=bool)
+    r2 = radius_px * radius_px
+
+    # vectorized per-center accumulation
     for (y, x) in centers:
-        mask |= (xx - x)**2 + (yy - y)**2 <= radius_px**2
+        # minimal periodic offset along each axis: wrap into [-N/2, N/2]
+        dy = (yy - y + N//2) % N - N//2
+        dx = (xx - x + N//2) % N - N//2
+        mask |= (dx*dx + dy*dy) <= r2
+
     return mask
 
 def J_collect(u_spatial_real, mask, dx=1.0):
@@ -117,21 +128,35 @@ def optimize(u_tilde_real, K, radius_px, obj_fn, iters, step_px, seed=None, init
 
 # objectives
 def nominal_obj(u_tilde_real, centers, radius_px, **_):
-    mask = disk_mask(u_tilde_real.shape[0], centers, radius_px)
+    mask = disk_mask_torus(u_tilde_real.shape[0], centers, radius_px)
     return J_collect(u_tilde_real, mask)
 
 def robust_obj(u_tilde_real, centers, radius_px, r_radius, s_minus_nu, **_):
-    mask = disk_mask(u_tilde_real.shape[0], centers, radius_px)
+    mask = disk_mask_torus(u_tilde_real.shape[0], centers, radius_px)
     nominal = J_collect(u_tilde_real, mask)
-    dual = dual_norm_indicator(mask, s_minus_nu)
+    if r_radius == 0.0:
+        return nominal
+    dual = dual_norm_indicator(mask, s_minus_nu)  # FFT already assumes periodicity
     return nominal + r_radius * dual
 
-def _draw_disks(ax, centers, radius_px, edgecolor, label):
+def _draw_disks_torus(ax, centers, radius_px, edgecolor, label, N):
+    """
+    Draw disks with wrap-around by tiling centers in 3x3 neighbor tiles.
+    """
+    first = True
+    shifts = (-N, 0, N)
     for (y, x) in centers:
-        circ = Circle((x, y), radius_px, fill=False, lw=2.0, ec=edgecolor, alpha=0.95)
-        ax.add_patch(circ)
-        ax.plot([x], [y], marker='o', ms=4, mec='k', mfc=edgecolor, lw=0.5, label=label)
-        label = None  # only label first
+        for dy in shifts:
+            for dx in shifts:
+                yy = y + dy
+                xx = x + dx
+                # only draw those that intersect the visible tile for less clutter
+                if -radius_px <= yy < N + radius_px and -radius_px <= xx < N + radius_px:
+                    circ = Circle((xx, yy), radius_px, fill=False, lw=2.0, ec=edgecolor, alpha=0.95)
+                    ax.add_patch(circ)
+                    ax.plot([xx], [yy], marker='o', ms=4, mec='k', mfc=edgecolor, lw=0.5,
+                            label=label if first else None)
+                    first = False
 
 def visualize_layouts(u_bg, w_nom, w_rob, radius_px, title, out_path, vmin=None, vmax=None):
     """
@@ -142,12 +167,16 @@ def visualize_layouts(u_bg, w_nom, w_rob, radius_px, title, out_path, vmin=None,
     im = ax.imshow(u_bg, origin='upper', interpolation='nearest', vmin=vmin, vmax=vmax)
     plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label='intensity')
 
-    _draw_disks(ax, w_nom, radius_px, edgecolor='crimson', label='nominal')
-    _draw_disks(ax, w_rob, radius_px, edgecolor='deepskyblue', label='robust')
+    N = u_bg.shape[0]
+    _draw_disks_torus(ax, w_nom, radius_px, edgecolor='crimson', label='nominal', N=N)
+    _draw_disks_torus(ax, w_rob, radius_px, edgecolor='deepskyblue', label='robust', N=N)
 
     ax.set_title(title)
     ax.set_xlabel('x (pixels)')
     ax.set_ylabel('y (pixels)')
+    ax.set_xlim(0, N)
+    ax.set_ylim(N, 0)  # flip y to keep (0,0) at top-left if that’s your convention
+
     # build legend from the two first points we plotted
     handles, labels = ax.get_legend_handles_labels()
     if handles:
