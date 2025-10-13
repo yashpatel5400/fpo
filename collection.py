@@ -191,6 +191,55 @@ def visualize_layouts(u_bg, w_nom, w_rob, radius_px, title, out_path, vmin=None,
     plt.savefig(out_path, bbox_inches='tight')
     plt.close(fig)
 
+def visualize_side_by_side(u_pred, u_true, w_nom, w_rob, radius_px, title, out_path,
+                            vmin_pred=None, vmax_pred=None, vmin_true=None, vmax_true=None):
+
+    N = u_pred.shape[0]
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5.5), dpi=150, sharex=True, sharey=True)
+
+    # ---- left: predicted ----
+    im = axes[0].imshow(u_pred, origin='upper', interpolation='nearest',
+                        vmin=vmin_pred, vmax=vmax_pred)
+    _draw_disks_torus(axes[0], w_nom, radius_px, edgecolor='crimson', label='nominal', N=N)
+    _draw_disks_torus(axes[0], w_rob, radius_px, edgecolor='deepskyblue', label='robust', N=N)
+    axes[0].set_xlim(0, N); axes[0].set_ylim(N, 0)
+    axes[0].set_title("Predicted field (SNN)")
+    axes[0].set_xlabel("x (pixels)")
+    axes[0].set_ylabel("y (pixels)")
+
+    # ---- right: true ----
+    im = axes[1].imshow(u_true, origin='upper', interpolation='nearest',
+                        vmin=vmin_true, vmax=vmax_true)
+    _draw_disks_torus(axes[1], w_nom, radius_px, edgecolor='crimson', label='nominal', N=N)
+    _draw_disks_torus(axes[1], w_rob, radius_px, edgecolor='deepskyblue', label='robust', N=N)
+    axes[1].set_xlim(0, N); axes[1].set_ylim(N, 0)
+    axes[1].set_title("True field")
+    axes[1].set_xlabel("x (pixels)")
+
+    # ---- single shared colorbar on the right ----
+    fig.subplots_adjust(right=0.86, left=0.08, top=0.92, bottom=0.08, wspace=0.15)
+    cbar_ax = fig.add_axes([0.87, 0.15, 0.02, 0.7])   # [left, bottom, width, height]
+    cbar = fig.colorbar(im, cax=cbar_ax)
+    cbar.set_label("intensity")
+
+    # ---- unified legend (move slightly up) ----
+    handles, labels = axes[1].get_legend_handles_labels()
+    if handles:
+        seen = set(); H=[]; L=[]
+        for h,l in zip(handles, labels):
+            if l and l not in seen:
+                seen.add(l); H.append(h); L.append(l)
+        fig.legend(H, L,
+                   loc='center left',
+                   bbox_to_anchor=(0.89, 0.72),   # shifted upward a bit
+                   frameon=False, handlelength=1.8)
+
+    # ---- finalize ----
+    fig.suptitle(title, fontsize=13, y=0.97)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    plt.savefig(out_path, bbox_inches='tight', pad_inches=0.02, dpi=200)
+    plt.close(fig)
+
 def main():
     import argparse, os, json
     import numpy as np
@@ -495,53 +544,30 @@ def main():
         # ----- visualization -----
         # decide where to save
         viz_root = args.viz_dir or os.path.join(args.results_out, "viz")
-        if t < max(0, int(args.viz_trials)):
-            # Use same color scale per trial (optional): clip at 99th percentile for contrast if vmax not provided
-            if args.viz_vmax is not None:
-                vmax = args.viz_vmax
-            else:
-                # robust to outliers, good contrast for GRFs and fibers
-                vmax = float(np.percentile(np.abs(u_tilde_real), 99.5)) if args.pde_type not in ['poisson','heat_equation'] \
-                    else float(np.percentile(u_tilde_real, 99.5))
-            vmin = None  # let matplotlib auto-scale floor
+        if 10 <= t < 10 + args.viz_trials:
+            viz_root = args.viz_dir or os.path.join(args.results_out, "viz")
+            vmax = float(np.percentile(np.abs(u_tilde_real), 99.5)) if args.pde_type not in ['poisson','heat_equation'] \
+                else float(np.percentile(u_tilde_real, 99.5))
+            vmax_true = float(np.percentile(np.abs(u_true_real), 99.5)) if args.pde_type not in ['poisson','heat_equation'] \
+                        else float(np.percentile(u_true_real, 99.5))
 
-            # predicted background
-            out_pred = os.path.join(
+            out_path = os.path.join(
                 viz_root,
-                f"trial{t:03d}_pred_PDE{args.pde_type}_N{N}_Nout{args.snn_output_res}_K{args.K_facilities}_rpx{args.radius_px}.png"
+                f"trial{t:03d}_sidebyside_PDE{args.pde_type}_N{N}_Nout{args.snn_output_res}_K{args.K_facilities}_rpx{args.radius_px}.png"
             )
-            visualize_layouts(
-                u_bg=u_tilde_real,
+
+            visualize_side_by_side(
+                u_pred=u_tilde_real,
+                u_true=u_true_real,
                 w_nom=w_nom,
                 w_rob=w_rob,
                 radius_px=args.radius_px,
-                title=f"Predicted field (SNN) — nominal (red) vs robust (blue)",
-                out_path=out_pred,
-                vmin=vmin, vmax=vmax
+                title=f"Nominal (red) vs Robust (blue)",
+                out_path=out_path,
+                vmin_pred=None, vmax_pred=vmax,
+                vmin_true=None, vmax_true=vmax_true
             )
-
-            if args.viz_show_true:
-                out_true = os.path.join(
-                    viz_root,
-                    f"trial{t:03d}_true_PDE{args.pde_type}_N{N}_Nout{args.snn_output_res}_K{args.K_facilities}_rpx{args.radius_px}.png"
-                )
-                # reuse vmax heuristic but on true field for fair visual contrast
-                if args.viz_vmax is None:
-                    vmax_true = float(np.percentile(np.abs(u_true_real), 99.5)) if args.pde_type not in ['poisson','heat_equation'] \
-                                else float(np.percentile(u_true_real, 99.5))
-                else:
-                    vmax_true = args.viz_vmax
-
-                visualize_layouts(
-                    u_bg=u_true_real,
-                    w_nom=w_nom,
-                    w_rob=w_rob,
-                    radius_px=args.radius_px,
-                    title=f"TRUE field — nominal (red) vs robust (blue)",
-                    out_path=out_true,
-                    vmin=None, vmax=vmax_true
-                )
-
+    
     arr = np.array(results)
     diffs = arr[:, 1] - arr[:, 0]
     mean_nom = float(arr[:, 0].mean())
