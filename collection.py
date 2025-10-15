@@ -240,6 +240,133 @@ def visualize_side_by_side(u_pred, u_true, w_nom, w_rob, radius_px, title, out_p
     plt.savefig(out_path, bbox_inches='tight', pad_inches=0.02, dpi=200)
     plt.close(fig)
 
+
+# ====== helpers ======
+def make_grid(N, device):
+    y = torch.arange(N, device=device).float()
+    x = torch.arange(N, device=device).float()
+    Y, X = torch.meshgrid(y, x, indexing='ij')
+    return Y, X
+
+def torus_delta(Z, c, N):
+    # minimal periodic offset: wrap into [-N/2, N/2)
+    return (Z - c + N/2) % N - N/2
+
+def soft_union_mask_torus(N, centers_yx, radius_px, tau, device):
+    """
+    centers_yx: (K,2) tensor, (y,x) in [0,N)
+    returns M in [0,1] with shape (N,N), differentiable.
+    """
+    Y, X = make_grid(N, device)
+    # (K,1,1) broadcast
+    cy = centers_yx[:, 0].view(-1, 1, 1)
+    cx = centers_yx[:, 1].view(-1, 1, 1)
+    dy = torus_delta(Y, cy, N)                 # (K,N,N)
+    dx = torus_delta(X, cx, N)                 # (K,N,N)
+    dist = torch.sqrt(dx*dx + dy*dy + 1e-12)   # (K,N,N)
+    # smooth disk via sigmoid: inside -> ~1, outside -> ~0
+    m = torch.sigmoid((radius_px - dist) / tau)  # (K,N,N)
+    # union: 1 - Π(1 - m_i)
+    M = 1.0 - torch.prod(1.0 - m, dim=0)       # (N,N)
+    return M
+
+def sobolev_dual_norm(mask, s_minus_nu):
+    """
+    ||mask||_{(H^{s-nu})*} via FFT, differentiable in PyTorch.
+    """
+    N = mask.shape[0]
+    Mhat = torch.fft.fftshift(torch.fft.fft2(mask))  # complex
+    # frequency grid
+    k = torch.fft.fftfreq(N, d=1.0).to(mask.device) * N
+    kx, ky = torch.meshgrid(k, k, indexing='ij')
+    k2 = kx**2 + ky**2
+    w = (1.0 + k2).pow(s_minus_nu)  # (N,N)
+    val = (Mhat.abs()**2 / w).sum()
+    # normalize like your numpy version (divide by N^2)
+    return torch.sqrt(val) / (N * N)
+
+# ====== main optimizer ======
+@torch.no_grad()
+def _wrap_centers_(centers_yx, N):
+    centers_yx[:, 0].remainder_(N)
+    centers_yx[:, 1].remainder_(N)
+    return centers_yx
+
+def optimize_softmask_adam(
+    u_pred_real: np.ndarray,
+    K: int,
+    radius_px: float,
+    r_radius: float = 0.0,
+    s_minus_nu: float = 0.0,
+    steps: int = 800,
+    lr: float = 0.1,
+    tau: float = 1.5,             # softness (pixels)
+    restarts: int = 1,
+    seed: int = 0,
+    device: str = "cpu",
+    return_mask: bool = False,
+    use_robust: bool = True,
+):
+    """
+    Gradient ascent on centers (continuous) using soft torus masks.
+    Returns centers as a list[(y,x)] in pixel coordinates and the final objective value.
+    """
+    torch.manual_seed(seed)
+    N = u_pred_real.shape[0]
+    u = torch.as_tensor(u_pred_real, device=device, dtype=torch.float32)
+
+    best_val = -1e30
+    best_centers = None
+    best_mask = None
+
+    for r in range(restarts):
+        # init centers uniformly in [0,N)
+        c0 = torch.rand(K, 2, device=device) * N
+        c0.requires_grad_(True)
+        opt = torch.optim.Adam([c0], lr=lr)
+
+        for t in range(steps):
+            opt.zero_grad()
+            # wrap to torus to keep in [0,N)
+            with torch.no_grad():
+                _wrap_centers_(c0, N)
+
+            M = soft_union_mask_torus(N, c0, radius_px, tau, device=device)
+            nominal = (u * M).sum()
+
+            if use_robust and r_radius > 0.0:
+                dual = sobolev_dual_norm(M, s_minus_nu)
+                obj = nominal + r_radius * dual
+            else:
+                obj = nominal
+
+            # gradient ASCENT
+            loss = -obj
+            loss.backward()
+            opt.step()
+
+        # evaluate final
+        with torch.no_grad():
+            _wrap_centers_(c0, N)
+            M = soft_union_mask_torus(N, c0, radius_px, tau, device=device)
+            nominal = (u * M).sum()
+            if use_robust and r_radius > 0.0:
+                dual = sobolev_dual_norm(M, s_minus_nu)
+                val = (nominal + r_radius * dual).item()
+            else:
+                val = nominal.item()
+
+        if val > best_val:
+            best_val = val
+            best_centers = c0.detach().cpu().numpy()
+            if return_mask:
+                best_mask = M.detach().cpu().numpy()
+
+    centers_list = [(float(y), float(x)) for (y, x) in best_centers]
+    if return_mask:
+        return centers_list, best_val, best_mask
+    return centers_list, best_val
+
 def main():
     import argparse, os, json
     import numpy as np
@@ -391,98 +518,6 @@ def main():
 
     s_minus_nu = float(args.s_theorem - args.nu_theorem)  # = 0 with defaults
 
-    # ---------- optimization helpers ----------
-    def disk_mask(N, centers, radius_px):
-        yy, xx = np.meshgrid(np.arange(N), np.arange(N), indexing='ij')
-        mask = np.zeros((N, N), dtype=bool)
-        for (y, x) in centers:
-            mask |= (xx - x)**2 + (yy - y)**2 <= radius_px**2
-        return mask
-
-    def J_collect(u_spatial_real, mask, dx=1.0):
-        return float(u_spatial_real[mask].sum() * dx * dx)
-
-    def sobolev_weight(N, s_minus_nu):
-        k = np.fft.fftfreq(N) * N
-        kx, ky = np.meshgrid(k, k, indexing='ij')
-        k2 = kx**2 + ky**2
-        return (1.0 + k2)**(s_minus_nu)
-
-    def fft2c(x):
-        return np.fft.fftshift(np.fft.fft2(x))
-
-    def dual_norm_indicator(mask, s_minus_nu):
-        Nloc = mask.shape[0]
-        Chi = mask.astype(float)
-        ChiHat = fft2c(Chi)
-        w = sobolev_weight(Nloc, s_minus_nu)
-        val = np.sum(np.abs(ChiHat)**2 / w)
-        return float(np.sqrt(val) / (Nloc * Nloc))
-
-    def nominal_obj(u_tilde_real, centers, radius_px, **_):
-        mask = disk_mask(u_tilde_real.shape[0], centers, radius_px)
-        return J_collect(u_tilde_real, mask)
-
-    def robust_obj(u_tilde_real, centers, radius_px, r_radius, s_minus_nu, **_):
-        mask = disk_mask(u_tilde_real.shape[0], centers, radius_px)
-        nominal = J_collect(u_tilde_real, mask)
-        dual = dual_norm_indicator(mask, s_minus_nu)
-        return nominal + r_radius * dual
-
-    def random_centers(N, K, rng):
-        return [(int(rng.integers(0, N)), int(rng.integers(0, N))) for _ in range(K)]
-
-    def propose(centers, N, step_px, rng):
-        new = list(centers)
-        i = rng.integers(0, len(new))
-        dy = int(rng.integers(-step_px, step_px + 1))
-        dx = int(rng.integers(-step_px, step_px + 1))
-        y, x = new[i]
-        y = min(max(0, y + dy), N - 1)
-        x = min(max(0, x + dx), N - 1)
-        new[i] = (y, x)
-        return new
-
-    def optimize(u_tilde_real, K, radius_px, obj_fn, iters, step_px, seed=None, init_centers=None, rng=None, **obj_kwargs):
-        if rng is None:
-            rng = np.random.default_rng(seed)
-        Nloc = u_tilde_real.shape[0]
-        centers = init_centers if init_centers is not None else random_centers(Nloc, K, rng)
-        best = centers
-        best_val = obj_fn(u_tilde_real, best, radius_px, **obj_kwargs)
-        for _ in range(iters):
-            cand = propose(best, Nloc, step_px, rng)
-            val = obj_fn(u_tilde_real, cand, radius_px, **obj_kwargs)
-            if val > best_val:
-                best, best_val = cand, val
-        return best, best_val
-
-    # ---------- spectrum <-> spatial helpers ----------
-    def spectrum_complex_to_channels_torch(spectrum_mat_complex):
-        if not isinstance(spectrum_mat_complex, torch.Tensor):
-            spectrum_mat_complex = torch.from_numpy(spectrum_mat_complex)
-        if not torch.is_complex(spectrum_mat_complex):
-            if spectrum_mat_complex.ndim == 3 and spectrum_mat_complex.shape[0] == 2:
-                return spectrum_mat_complex.float()
-            raise ValueError("Expected complex [K,K] or real [2,K,K].")
-        return torch.stack([spectrum_mat_complex.real, spectrum_mat_complex.imag], dim=0).float()
-
-    def channels_to_spectrum_complex_torch(channels_mat_real_imag):
-        if channels_mat_real_imag.ndim != 3 or channels_mat_real_imag.shape[0] != 2:
-            raise ValueError("channels_to_spectrum_complex_torch expects [2,K,K].")
-        return torch.complex(channels_mat_real_imag[0], channels_mat_real_imag[1])
-
-    def pad_to_full_centered(block_centered, K_full):
-        K_out = block_centered.shape[0]
-        full = np.zeros((K_full, K_full), dtype=block_centered.dtype)
-        s = K_full // 2 - K_out // 2
-        e = s + K_out
-        full[s:e, s:e] = block_centered
-        return full
-
-    def spec_to_spatial_centered(full_centered):
-        return np.fft.ifft2(np.fft.ifftshift(full_centered))
-
     # ----- per-trial loop -----
     results = []
     rng_master = np.random.default_rng(args.seed)
@@ -517,28 +552,41 @@ def main():
         # same RNG and same init centers for both nominal & robust to ensure comparability
         trial_seed = int(rng_master.integers(0, 10_000_000))
 
-        # 1) draw shared initial centers with a dedicated RNG
-        rng_init = np.random.default_rng(trial_seed)
-        init_centers = random_centers(N, args.K_facilities, rng_init)
+        # centers via gradient ascent (nominal)
+        w_nom, _ = optimize_softmask_adam(
+            u_pred_real=u_tilde_real,
+            K=args.K_facilities,
+            radius_px=args.radius_px,
+            r_radius=0.0,                  # nominal
+            s_minus_nu=s_minus_nu,
+            steps=600,
+            lr=0.15,
+            tau=1.5,
+            restarts=3,                    # a few restarts helps
+            seed=trial_seed,
+            device="cuda" if torch.cuda.is_available() else "cpu",
+            use_robust=False
+        )
 
-        # 2) make two *independent* RNGs with the same seed for identical proposal streams
-        rng_nom = np.random.default_rng(trial_seed + 1)
-        rng_rob = np.random.default_rng(trial_seed + 1)
-
-        # NOMINAL
-        w_nom, _ = optimize(u_tilde_real, args.K_facilities, args.radius_px,
-                            nominal_obj, iters=args.iters, step_px=args.step_px,
-                            rng=rng_nom, init_centers=init_centers)
-
-        # ROBUST
-        w_rob, _ = optimize(u_tilde_real, args.K_facilities, args.radius_px,
-                            robust_obj, iters=args.iters, step_px=args.step_px,
-                            rng=rng_rob, init_centers=init_centers,
-                            r_radius=r_radius, s_minus_nu=s_minus_nu)
+        # centers via gradient ascent (robust)
+        w_rob, _ = optimize_softmask_adam(
+            u_pred_real=u_tilde_real,
+            K=args.K_facilities,
+            radius_px=args.radius_px,
+            r_radius=r_radius,             # your sqrt(q) radius
+            s_minus_nu=s_minus_nu,
+            steps=600,
+            lr=0.15,
+            tau=1.5,
+            restarts=3,
+            seed=trial_seed,
+            device="cuda" if torch.cuda.is_available() else "cpu",
+            use_robust=True
+        )
 
         # evaluate both on TRUE field
-        Jn = J_collect(u_true_real, disk_mask(N, w_nom, args.radius_px))
-        Jr = J_collect(u_true_real, disk_mask(N, w_rob, args.radius_px))
+        Jn = J_collect(u_true_real, disk_mask_torus(N, w_nom, args.radius_px))
+        Jr = J_collect(u_true_real, disk_mask_torus(N, w_rob, args.radius_px))
         results.append((Jn, Jr))
 
         # ----- visualization -----
