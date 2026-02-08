@@ -376,3 +376,27 @@ if __name__ == "__main__":
         f.write(table_tex)
     print(f"\nLaTeX table saved to: {args.latex_out}\n")
     print(table_tex)
+
+    # Persist summary JSON for downstream aggregation
+    summary_path = os.path.join(args.results_out, "summary.json")
+    serializable_results = []
+    for (alpha, nout), stats in results.items():
+        entry = {"rho": alpha, "nout": nout}
+        entry.update(stats)
+        serializable_results.append(entry)
+    summary_payload = {
+        "pde_type": args.pde_type,
+        "grf_alpha_values": args.grf_alpha_values,
+        "k_snn_output_res_values": args.k_snn_output_res_values,
+        "n_grid_sim_input_ds": args.n_grid_sim_input_ds,
+        "evolution_time_T": getattr(args, "evolution_time_T", None),
+        "viscosity_nu": getattr(args, "viscosity_nu", None),
+        "alpha_for_radius": args.alpha_for_radius,
+        "results": serializable_results,
+    }
+    try:
+        with open(summary_path, "w") as f:
+            json.dump(summary_payload, f, indent=2)
+        print(f"Summary JSON saved to: {summary_path}")
+    except Exception as e:
+        print(f"WARNING: Failed to write summary JSON to {summary_path}: {e}")

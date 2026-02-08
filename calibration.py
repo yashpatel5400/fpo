@@ -2,6 +2,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.model_selection import train_test_split
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import os
 import argparse 
@@ -152,6 +154,8 @@ if __name__ == '__main__':
     # --- Output Control ---
     parser.add_argument('--results_dir', type=str, default="results_conformal_theorem_validation")
     parser.add_argument('--no_plot', action='store_true')
+    parser.add_argument('--show_plots', action='store_true',
+                        help="If set, display plots interactively in addition to saving.")
 
     args = parser.parse_args()
 
@@ -406,7 +410,8 @@ if __name__ == '__main__':
         theorem_coverage_plot_path = os.path.join(args.results_dir, f"conformal_coverage_comparison{output_filename_suffix_calib}.png")
         plt.savefig(theorem_coverage_plot_path)
         print(f"\nCoverage comparison plot saved to {theorem_coverage_plot_path}")
-        plt.show()
+        if args.show_plots:
+            plt.show()
         plt.close() 
     
     save_B_info_str = "Sample_Dependent_B" 

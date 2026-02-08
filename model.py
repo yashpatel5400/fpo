@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader, random_split
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import os
 import argparse 
@@ -221,6 +223,8 @@ if __name__ == '__main__':
     # --- Output Directories ---
     parser.add_argument('--model_save_dir', type=str, default="trained_snn_models")
     parser.add_argument('--plot_save_dir', type=str, default="results_snn_training")
+    parser.add_argument('--show_plots', action='store_true',
+                        help="If set, display plots interactively. Default saves only.")
 
     # --- Parameters for Filename Construction (must match data_gen_script) ---
     parser.add_argument('--grf_alpha', type=float, default=4.0) 
@@ -319,5 +323,8 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.savefig(full_plot_save_path)
     print(f"\nTraining loss plot saved to {full_plot_save_path}")
-    plt.show()
+    if args.show_plots:
+        plt.show()
+    else:
+        plt.close()
     print("\nSNN training script finished.")

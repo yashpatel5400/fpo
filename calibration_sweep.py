@@ -1,4 +1,6 @@
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import os
 import subprocess
@@ -195,6 +197,10 @@ if __name__ == '__main__':
     parser.add_argument('--model_dir', type=str, default="trained_snn_models_sweep_final_v3")
     parser.add_argument('--results_dir_calib_base', type=str, default="results_conformal_validation_sweep_final_v3")
     parser.add_argument('--results_dir_sweep_plots', type=str, default="results_calibration_sweep_plots_final_v3")
+    parser.add_argument('--show_plots', action='store_true',
+                        help="If set, display summary plots interactively.")
+    parser.add_argument('--no_plot', action='store_true',
+                        help="Forward to calibration.py to suppress plots.")
     
     parser.add_argument('--skip_data_gen', action='store_true')
     parser.add_argument('--skip_snn_train', action='store_true')
@@ -399,7 +405,9 @@ if __name__ == '__main__':
                 combined_plot_full_path = os.path.join(args.results_dir_sweep_plots, combined_plot_filename)
                 plt.savefig(combined_plot_full_path)
                 print(f"\nCombined GRF Alpha calibration curve plot saved to {combined_plot_full_path}")
-                plt.show()
+                if args.show_plots:
+                    plt.show()
+                plt.close(fig)
             else:
                 plt.close(fig) 
                 print(f"  No data to plot for any GRF Alpha value in this figure.")
