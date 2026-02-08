@@ -163,6 +163,7 @@ def worker_run_shard(params):
         "--step_px", a.step_px,
         "--seed", shard_seed,
         "--alpha_for_radius", a.alpha_for_radius,
+        "--multi_stage_factors", a.multi_stage_factors,
         "--s_theorem", a.s_theorem,
         "--nu_theorem", a.nu_theorem,
         "--snn_hidden_channels", a.snn_hidden_channels,
@@ -252,6 +253,8 @@ if __name__ == "__main__":
     ap.add_argument('--radius_px', type=int, default=6)
     ap.add_argument('--step_px', type=int, default=3)
     ap.add_argument('--seed', type=int, default=0)
+    ap.add_argument('--multi_stage_factors', type=str, default="4,2,1",
+                    help='Comma-separated factors passed to collection.py for multi-stage optimization.')
 
     ap.add_argument('--alpha_for_radius', type=float, default=0.10)
     ap.add_argument('--s_theorem', type=float, default=2.0)

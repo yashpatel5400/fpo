@@ -270,6 +270,20 @@ def soft_union_mask_torus(N, centers_yx, radius_px, tau, device):
     M = 1.0 - torch.prod(1.0 - m, dim=0)       # (N,N)
     return M
 
+
+def downsample_average(u: np.ndarray, factor: int) -> np.ndarray:
+    """
+    Downsample by integer factor using block averaging.
+    """
+    if factor == 1:
+        return u
+    N = u.shape[0]
+    if N % factor != 0:
+        raise ValueError(f"N={N} not divisible by factor={factor} for downsample.")
+    n_new = N // factor
+    u_reshaped = u.reshape(n_new, factor, n_new, factor)
+    return u_reshaped.mean(axis=(1, 3))
+
 def sobolev_dual_norm(mask, s_minus_nu):
     """
     ||mask||_{(H^{s-nu})*} via FFT, differentiable in PyTorch.
@@ -306,6 +320,7 @@ def optimize_softmask_adam(
     device: str = "cpu",
     return_mask: bool = False,
     use_robust: bool = True,
+    init_centers: list | None = None,
 ):
     """
     Gradient ascent on centers (continuous) using soft torus masks.
@@ -320,8 +335,12 @@ def optimize_softmask_adam(
     best_mask = None
 
     for r in range(restarts):
-        # init centers uniformly in [0,N)
-        c0 = torch.rand(K, 2, device=device) * N
+        if init_centers is not None and len(init_centers) == K:
+            c0_np = np.array(init_centers, dtype=np.float32)
+            c0 = torch.tensor(c0_np, device=device, dtype=torch.float32)
+        else:
+            # init centers uniformly in [0,N)
+            c0 = torch.rand(K, 2, device=device) * N
         c0.requires_grad_(True)
         opt = torch.optim.Adam([c0], lr=lr)
 
@@ -412,6 +431,8 @@ def main():
     p.add_argument('--step_px', type=int, default=3)
     p.add_argument('--trials', type=int, default=30)
     p.add_argument('--seed', type=int, default=0)
+    p.add_argument('--multi_stage_factors', type=str, default="4,2,1",
+                   help='Comma-separated integer factors for multi-stage optimization (coarse->fine). Example: "4,2,1". If empty, single-stage.')
 
     # bootstrap (optional CI)
     p.add_argument('--bootstrap_samples', type=int, default=0, help='If >0, compute bootstrap CI for mean diff (e.g., 5000)')
@@ -518,6 +539,18 @@ def main():
 
     s_minus_nu = float(args.s_theorem - args.nu_theorem)  # = 0 with defaults
 
+    # ----- parse multi-stage factors -----
+    factors = [1]
+    if args.multi_stage_factors:
+        try:
+            factors = [int(x) for x in args.multi_stage_factors.split(',') if x.strip()]
+        except ValueError:
+            print(f"Invalid multi_stage_factors '{args.multi_stage_factors}', falling back to single stage.")
+            factors = [1]
+    if 1 not in factors:
+        factors.append(1)
+    factors = sorted(set(factors), reverse=True)
+
     # ----- per-trial loop -----
     results = []
     rng_master = np.random.default_rng(args.seed)
@@ -552,37 +585,41 @@ def main():
         # same RNG and same init centers for both nominal & robust to ensure comparability
         trial_seed = int(rng_master.integers(0, 10_000_000))
 
-        # centers via gradient ascent (nominal)
-        w_nom, _ = optimize_softmask_adam(
-            u_pred_real=u_tilde_real,
-            K=args.K_facilities,
-            radius_px=args.radius_px,
-            r_radius=0.0,                  # nominal
-            s_minus_nu=s_minus_nu,
-            steps=600,
-            lr=0.15,
-            tau=1.5,
-            restarts=3,                    # a few restarts helps
-            seed=trial_seed,
-            device="cuda" if torch.cuda.is_available() else "cpu",
-            use_robust=False
-        )
+        # multi-stage optimization: coarse -> fine
+        def run_multistage(u_field, r_radius_stage):
+            centers_prev = None
+            factor_prev = None
+            for f in factors:
+                u_stage = downsample_average(u_field, f)
+                N_stage = u_stage.shape[0]
+                radius_stage = max(1e-6, args.radius_px / f)
+                step_stage = max(1, int(round(args.step_px / f)))
+                init_stage = None
+                if centers_prev is not None and factor_prev is not None:
+                    scale = factor_prev / f
+                    init_stage = [(y * scale, x * scale) for (y, x) in centers_prev]
+                centers_stage, _ = optimize_softmask_adam(
+                    u_pred_real=u_stage,
+                    K=args.K_facilities,
+                    radius_px=radius_stage,
+                    r_radius=r_radius_stage,
+                    s_minus_nu=s_minus_nu,
+                    steps=max(200, int(600 / f)),  # fewer steps on coarser grids
+                    lr=0.15,
+                    tau=1.5,
+                    restarts=1 if init_stage is not None else 3,
+                    seed=trial_seed,
+                    device="cuda" if torch.cuda.is_available() else "cpu",
+                    use_robust=(r_radius_stage > 0),
+                    init_centers=init_stage,
+                )
+                centers_prev = centers_stage
+                factor_prev = f
+            # final centers are in last stage grid (should be factor=1 => full res)
+            return centers_prev
 
-        # centers via gradient ascent (robust)
-        w_rob, _ = optimize_softmask_adam(
-            u_pred_real=u_tilde_real,
-            K=args.K_facilities,
-            radius_px=args.radius_px,
-            r_radius=r_radius,             # your sqrt(q) radius
-            s_minus_nu=s_minus_nu,
-            steps=600,
-            lr=0.15,
-            tau=1.5,
-            restarts=3,
-            seed=trial_seed,
-            device="cuda" if torch.cuda.is_available() else "cpu",
-            use_robust=True
-        )
+        w_nom = run_multistage(u_tilde_real, r_radius_stage=0.0)
+        w_rob = run_multistage(u_tilde_real, r_radius_stage=r_radius)
 
         # evaluate both on TRUE field
         Jn = J_collect(u_true_real, disk_mask_torus(N, w_nom, args.radius_px))
