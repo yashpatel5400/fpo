@@ -286,10 +286,21 @@ def main(args):
         else:
             raise KeyError("Neither 'alpha_values_for_quantiles' nor 'nominal_coverages' found in calibration data.")
 
-        q_star_val = calib_data['avg_R_bounds_for_alpha'][closest_alpha_idx] 
-        L2_ball_radius_calculated = q_star_val
-        print(f"Loaded calibration data. For target alpha~{args.alpha_for_radius:.3f} (used {actual_alpha_used:.3f}), found q*={q_star_val:.4e}.")
-        print(f"Calculated L2 Uncertainty Ball Radius for Robust Opt: {L2_ball_radius_calculated:.4e}")
+        q_quantile_val = float(calib_data['quantiles_q_hat_nu'][closest_alpha_idx])
+        q_avg_bound_val = float(calib_data['avg_R_bounds_for_alpha'][closest_alpha_idx])
+        if args.quantum_radius_source == "avg_R":
+            L2_ball_radius_calculated = q_avg_bound_val
+        elif args.quantum_radius_source == "quantile":
+            L2_ball_radius_calculated = q_quantile_val
+        elif args.quantum_radius_source == "sqrt_quantile":
+            L2_ball_radius_calculated = float(np.sqrt(max(q_quantile_val, 0.0)))
+        else:
+            raise ValueError(f"Unknown quantum_radius_source: {args.quantum_radius_source}")
+        L2_ball_radius_calculated *= args.quantum_radius_scale
+        print(f"Loaded calibration data. For target alpha~{args.alpha_for_radius:.3f} (used {actual_alpha_used:.3f}), "
+              f"quantile={q_quantile_val:.4e}, avg_R={q_avg_bound_val:.4e}.")
+        print(f"Calculated L2 Uncertainty Ball Radius for Robust Opt "
+              f"({args.quantum_radius_source} x {args.quantum_radius_scale:g}): {L2_ball_radius_calculated:.4e}")
 
     except FileNotFoundError:
         print(f"ERROR: Calibration data file not found at {coverage_data_filename_npz}. Using default radius {L2_ball_radius_calculated}.")
@@ -403,7 +414,7 @@ def main(args):
         I_AB_phi_nom_on_true = calculate_I_AB_numpy(phi_nom_opt_np, args.num_distinct_states_M, sqrt_g_j_true_np, args.priors_q_j, target_device_str=str(DEVICE))
         nominal_IAB_on_true_trials.append(I_AB_phi_nom_on_true)
 
-        phi_rob_opt_np, _ = optimize_phases_pytorch(args.num_distinct_states_M, x_true_torch, q_priors_torch, target_device_obj=DEVICE, is_robust=True, x_center_for_robust_np=sqrt_g_j_estimated_np, L2_ball_radius_for_robust=L2_ball_radius_calculated, num_epochs=args.max_pytorch_opt_epochs, lr=args.pytorch_lr) 
+        phi_rob_opt_np, _ = optimize_phases_pytorch(args.num_distinct_states_M, x_estimated_torch, q_priors_torch, target_device_obj=DEVICE, is_robust=True, x_center_for_robust_np=sqrt_g_j_estimated_np, L2_ball_radius_for_robust=L2_ball_radius_calculated, num_epochs=args.max_pytorch_opt_epochs, lr=args.pytorch_lr) 
         I_AB_phi_rob_on_true = calculate_I_AB_numpy(phi_rob_opt_np, args.num_distinct_states_M, sqrt_g_j_true_np, args.priors_q_j, target_device_str=str(DEVICE))
         robust_IAB_on_true_trials.append(I_AB_phi_rob_on_true)
         
@@ -518,7 +529,7 @@ if __name__ == '__main__':
     parser.add_argument('--L_domain', type=float, default=2*np.pi)
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
     parser.add_argument('--fiber_potential_depth', type=float, default=1.0) 
-    parser.add_argument('--grin_strength', type=float, default=0.01)
+    parser.add_argument('--grin_strength', type=float, default=0.1)
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
     parser.add_argument('--hbar_val', type=float, default=HBAR_CONST) 
@@ -530,6 +541,11 @@ if __name__ == '__main__':
                         help='Components of delta_n for GUS phase ramp.')
     parser.add_argument('--alpha_for_radius', type=float, default=0.1,
                         help="Alpha value from calibration to determine the robust radius.")
+    parser.add_argument('--quantum_radius_source', type=str, default="avg_R",
+                        choices=["avg_R", "quantile", "sqrt_quantile"],
+                        help="Calibration quantity used as the robust radius for quantum optimization.")
+    parser.add_argument('--quantum_radius_scale', type=float, default=1.0,
+                        help="Multiplicative scale applied to the selected quantum robust radius.")
     parser.add_argument('--calibration_results_base_dir', type=str, required=True,
                         help="Base directory where calibration result subdirectories are stored.")
     parser.add_argument('--theorem_s', type=float, default=2.0, help="Theorem s parameter (for calib filename).")
@@ -542,6 +558,8 @@ if __name__ == '__main__':
     parser.add_argument('--max_pytorch_opt_epochs', type=int, default=300)
     parser.add_argument('--pytorch_lr', type=float, default=0.005)
     parser.add_argument('--priors_q_j', nargs='+', type=float, default=None) 
+    parser.add_argument('--seed', type=int, default=0,
+                        help="Random seed for GRF state sampling and phase optimization initialization.")
     
     # --- Output Control ---
     parser.add_argument('--results_dir', type=str, default="results_robust_opt_calibrated_radius")
@@ -549,6 +567,8 @@ if __name__ == '__main__':
                         help="Optional tag to prepend to output JSON filename.")
     
     args = parser.parse_args()
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
 
     if args.snn_output_res > args.n_grid_sim_input_ds:
         raise ValueError("SNN output resolution (--snn_output_res) cannot be greater than SNN input resolution (--n_grid_sim_input_ds).")

@@ -5,13 +5,16 @@ import multiprocessing
 from itertools import product
 import json
 import numpy as np
+import sys
 
 # ------------------------- subprocess helper (GPU-aware) -------------------------
 def run_script(script_name, args_list, log_prefix="", env_extra=None):
     """Run a python script with arguments; optionally set env vars (e.g., CUDA_VISIBLE_DEVICES)."""
-    cmd = ["python", script_name] + [str(a) for a in args_list]
+    cmd = [sys.executable, script_name] + [str(a) for a in args_list]
     print(f"{log_prefix}Executing: {' '.join(cmd)}")
     env = os.environ.copy()
+    env.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".mplconfig"))
+    env.setdefault("XDG_CACHE_HOME", os.path.join(os.getcwd(), ".cache"))
     if env_extra:
         env.update({k: str(v) for k, v in env_extra.items()})
     try:
@@ -164,6 +167,7 @@ def worker_run_shard(params):
         "--seed", shard_seed,
         "--alpha_for_radius", a.alpha_for_radius,
         "--multi_stage_factors", a.multi_stage_factors,
+        "--resource_transform", a.resource_transform,
         "--s_theorem", a.s_theorem,
         "--nu_theorem", a.nu_theorem,
         "--snn_hidden_channels", a.snn_hidden_channels,
@@ -255,6 +259,9 @@ if __name__ == "__main__":
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--multi_stage_factors', type=str, default="4,2,1",
                     help='Comma-separated factors passed to collection.py for multi-stage optimization.')
+    ap.add_argument('--resource_transform', type=str, default="real",
+                    choices=["real", "abs", "positive"],
+                    help='Transform real-valued PDE fields before resource collection.')
 
     ap.add_argument('--alpha_for_radius', type=float, default=0.10)
     ap.add_argument('--s_theorem', type=float, default=2.0)
@@ -268,8 +275,8 @@ if __name__ == "__main__":
     ap.add_argument('--grf_offset_sigma', type=float, default=0.5)
     ap.add_argument('--L_domain', type=float, default=2*np.pi)
     ap.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
-    ap.add_argument('--fiber_potential_depth', type=float, default=0.5)
-    ap.add_argument('--grin_strength', type=float, default=0.01)
+    ap.add_argument('--fiber_potential_depth', type=float, default=1.0)
+    ap.add_argument('--grin_strength', type=float, default=0.1)
     ap.add_argument('--viscosity_nu', type=float, default=0.01)
     ap.add_argument('--evolution_time_T', type=float, default=0.1)
     ap.add_argument('--solver_num_steps', type=int, default=50)

@@ -1,8 +1,12 @@
 import os
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".mplconfig"))
+os.environ.setdefault("XDG_CACHE_HOME", os.path.join(os.getcwd(), ".cache"))
 import argparse
 import numpy as np
 import torch
 import torch.nn as nn
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 
@@ -240,6 +244,16 @@ def visualize_side_by_side(u_pred, u_true, w_nom, w_rob, radius_px, title, out_p
     plt.savefig(out_path, bbox_inches='tight', pad_inches=0.02, dpi=200)
     plt.close(fig)
 
+def transform_resource_field(u_spatial, transform):
+    u_real = u_spatial.real
+    if transform == "real":
+        return u_real
+    if transform == "abs":
+        return np.abs(u_real)
+    if transform == "positive":
+        return np.maximum(u_real, 0.0)
+    raise ValueError(f"Unknown resource_transform: {transform}")
+
 
 # ====== helpers ======
 def make_grid(N, device):
@@ -252,12 +266,12 @@ def torus_delta(Z, c, N):
     # minimal periodic offset: wrap into [-N/2, N/2)
     return (Z - c + N/2) % N - N/2
 
-def soft_union_mask_torus(N, centers_yx, radius_px, tau, device):
+def soft_union_mask_torus(N, centers_yx, radius_px, tau, device, grid=None):
     """
     centers_yx: (K,2) tensor, (y,x) in [0,N)
     returns M in [0,1] with shape (N,N), differentiable.
     """
-    Y, X = make_grid(N, device)
+    Y, X = grid if grid is not None else make_grid(N, device)
     # (K,1,1) broadcast
     cy = centers_yx[:, 0].view(-1, 1, 1)
     cx = centers_yx[:, 1].view(-1, 1, 1)
@@ -284,17 +298,19 @@ def downsample_average(u: np.ndarray, factor: int) -> np.ndarray:
     u_reshaped = u.reshape(n_new, factor, n_new, factor)
     return u_reshaped.mean(axis=(1, 3))
 
-def sobolev_dual_norm(mask, s_minus_nu):
+def sobolev_dual_weights(N, s_minus_nu, device):
+    k = torch.fft.fftfreq(N, d=1.0).to(device) * N
+    kx, ky = torch.meshgrid(k, k, indexing='ij')
+    k2 = kx**2 + ky**2
+    return (1.0 + k2).pow(s_minus_nu)
+
+def sobolev_dual_norm(mask, s_minus_nu, weights=None):
     """
     ||mask||_{(H^{s-nu})*} via FFT, differentiable in PyTorch.
     """
     N = mask.shape[0]
     Mhat = torch.fft.fftshift(torch.fft.fft2(mask))  # complex
-    # frequency grid
-    k = torch.fft.fftfreq(N, d=1.0).to(mask.device) * N
-    kx, ky = torch.meshgrid(k, k, indexing='ij')
-    k2 = kx**2 + ky**2
-    w = (1.0 + k2).pow(s_minus_nu)  # (N,N)
+    w = weights if weights is not None else sobolev_dual_weights(N, s_minus_nu, mask.device)
     val = (Mhat.abs()**2 / w).sum()
     # normalize like your numpy version (divide by N^2)
     return torch.sqrt(val) / (N * N)
@@ -329,6 +345,8 @@ def optimize_softmask_adam(
     torch.manual_seed(seed)
     N = u_pred_real.shape[0]
     u = torch.as_tensor(u_pred_real, device=device, dtype=torch.float32)
+    grid = make_grid(N, device)
+    dual_weights = sobolev_dual_weights(N, s_minus_nu, device) if use_robust and r_radius > 0.0 else None
 
     best_val = -1e30
     best_centers = None
@@ -350,11 +368,11 @@ def optimize_softmask_adam(
             with torch.no_grad():
                 _wrap_centers_(c0, N)
 
-            M = soft_union_mask_torus(N, c0, radius_px, tau, device=device)
+            M = soft_union_mask_torus(N, c0, radius_px, tau, device=device, grid=grid)
             nominal = (u * M).sum()
 
             if use_robust and r_radius > 0.0:
-                dual = sobolev_dual_norm(M, s_minus_nu)
+                dual = sobolev_dual_norm(M, s_minus_nu, weights=dual_weights)
                 obj = nominal + r_radius * dual
             else:
                 obj = nominal
@@ -367,10 +385,10 @@ def optimize_softmask_adam(
         # evaluate final
         with torch.no_grad():
             _wrap_centers_(c0, N)
-            M = soft_union_mask_torus(N, c0, radius_px, tau, device=device)
+            M = soft_union_mask_torus(N, c0, radius_px, tau, device=device, grid=grid)
             nominal = (u * M).sum()
             if use_robust and r_radius > 0.0:
-                dual = sobolev_dual_norm(M, s_minus_nu)
+                dual = sobolev_dual_norm(M, s_minus_nu, weights=dual_weights)
                 val = (nominal + r_radius * dual).item()
             else:
                 val = nominal.item()
@@ -409,8 +427,8 @@ def main():
     p.add_argument('--grf_offset_sigma', type=float, default=0.5)
     p.add_argument('--L_domain', type=float, default=2*np.pi)
     p.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
-    p.add_argument('--fiber_potential_depth', type=float, default=0.5)
-    p.add_argument('--grin_strength', type=float, default=0.01)
+    p.add_argument('--fiber_potential_depth', type=float, default=1.0)
+    p.add_argument('--grin_strength', type=float, default=0.1)
     p.add_argument('--viscosity_nu', type=float, default=0.01)
     p.add_argument('--evolution_time_T', type=float, default=0.1)
     p.add_argument('--solver_num_steps', type=int, default=50)
@@ -433,6 +451,9 @@ def main():
     p.add_argument('--seed', type=int, default=0)
     p.add_argument('--multi_stage_factors', type=str, default="4,2,1",
                    help='Comma-separated integer factors for multi-stage optimization (coarse->fine). Example: "4,2,1". If empty, single-stage.')
+    p.add_argument('--resource_transform', type=str, default="real",
+                   choices=["real", "abs", "positive"],
+                   help='Transform real-valued PDE fields before resource collection.')
 
     # bootstrap (optional CI)
     p.add_argument('--bootstrap_samples', type=int, default=0, help='If >0, compute bootstrap CI for mean diff (e.g., 5000)')
@@ -570,7 +591,7 @@ def main():
         u_tilde = spec_to_spatial_centered(y_full_centered)
         # pick scalar field for objective
         if args.pde_type in ['poisson', 'heat_equation']:
-            u_tilde_real = u_tilde.real
+            u_tilde_real = transform_resource_field(u_tilde, args.resource_transform)
         else:
             u_tilde_real = np.abs(u_tilde)
 
@@ -578,7 +599,7 @@ def main():
         ga_full_centered = Ga_true_full[i]  # (N,N) complex
         u_true = spec_to_spatial_centered(ga_full_centered)
         if args.pde_type in ['poisson', 'heat_equation']:
-            u_true_real = u_true.real
+            u_true_real = transform_resource_field(u_true, args.resource_transform)
         else:
             u_true_real = np.abs(u_true)
 

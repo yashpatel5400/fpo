@@ -1,5 +1,9 @@
 import numpy as np
 import os
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".mplconfig"))
+os.environ.setdefault("XDG_CACHE_HOME", os.path.join(os.getcwd(), ".cache"))
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt 
 import argparse 
 import torch # For GaussianRF
@@ -30,7 +34,7 @@ class GaussianRF(object):
             else: 
                 k = torch.tensor([0], device=self.device)
             
-            self.sqrt_eig = (size * math.sqrt(2.0) * sigma * ((4 * (math.pi**2) * (k**2) + tau**2) ** (-alpha/2.0)))
+            self.sqrt_eig = (size * math.sqrt(2.0) * sigma * (((k**2) + tau**2) ** (-alpha/2.0)))
             
             if self.sqrt_eig.numel() > 0 and k_max > 0 : 
                 self.sqrt_eig[0] = 0.0
@@ -50,7 +54,7 @@ class GaussianRF(object):
             k_x = wavenumbers.transpose(0, 1)
             k_y = wavenumbers
             
-            self.sqrt_eig = ((size**2)*math.sqrt(2.0)*sigma*((4*(math.pi**2)*(k_x**2+k_y**2)+tau**2)**(-alpha/2.0)))
+            self.sqrt_eig = ((size**2)*math.sqrt(2.0)*sigma*(((k_x**2+k_y**2)+tau**2)**(-alpha/2.0)))
             if self.sqrt_eig.numel() > 0 and k_max > 0 : 
                 self.sqrt_eig[0,0] = 0.0
         else:
@@ -224,7 +228,10 @@ def generate_snn_dataset(num_samples, N_grid_sim_input, K_psi0_band_limit,
                          K_trunc_snn_output, 
                          pde_type,
                          grf_config,     
-                         waveguide_config):
+                         waveguide_config,
+                         seed=0):
+    rng = np.random.default_rng(seed)
+    torch.manual_seed(seed)
     dataset_gamma_b_full_input = []
     dataset_gamma_a_snn_target = []
     dataset_gamma_a_true_full_output = [] 
@@ -245,7 +252,7 @@ def generate_snn_dataset(num_samples, N_grid_sim_input, K_psi0_band_limit,
         
         if pde_type == "poisson":
             f_sample_grf = grf_generator.sample(1).cpu().numpy().squeeze()
-            f_real_with_offset = add_hierarchical_offset_2d(f_sample_grf, sigma=grf_config.get('offset_sigma', 0.5))
+            f_real_with_offset = add_hierarchical_offset_2d(f_sample_grf, sigma=grf_config.get('offset_sigma', 0.5), rng=rng)
             initial_real_space_state_f = f_real_with_offset - np.mean(f_real_with_offset) 
             gamma_b_full_input_spec = get_full_centered_spectrum(initial_real_space_state_f)
             f_hat_r = np.fft.rfft2(initial_real_space_state_f)
@@ -332,15 +339,17 @@ if __name__ == '__main__':
     parser.add_argument('--grf_tau', type=float, default=1.0)   
     parser.add_argument('--grf_offset_sigma', type=float, default=0.5, 
                         help="Sigma for hierarchical offset in Poisson source (f term).")
+    parser.add_argument('--seed', type=int, default=0,
+                        help="Random seed for GRF sampling and any randomized offsets.")
 
     # --- Fiber & Evolution Parameters ---
     parser.add_argument('--L_domain', type=float, default=2*np.pi, 
                         help="Physical domain size (e.g., 2pi for periodicity).")
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2, 
                         help="Core radius as fraction of L_domain/2.")
-    parser.add_argument('--fiber_potential_depth', type=float, default=0.5, 
+    parser.add_argument('--fiber_potential_depth', type=float, default=1.0, 
                         help="Depth V0 of the fiber potential well.")
-    parser.add_argument('--grin_strength', type=float, default=0.01,
+    parser.add_argument('--grin_strength', type=float, default=0.1,
                         help="Strength C of the GRIN fiber potential V(r) = C*r^2.")
     parser.add_argument('--viscosity_nu', type=float, default=0.01,
                         help="Viscosity/diffusivity nu for the Heat Equation.")
@@ -396,7 +405,8 @@ if __name__ == '__main__':
         args.k_trunc_snn_output, 
         args.pde_type,
         grf_config_for_input, 
-        waveguide_config_params
+        waveguide_config_params,
+        seed=args.seed
     )
     
     # Split the generated data into train and calib sets

@@ -2,10 +2,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.model_selection import train_test_split
+import os
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".mplconfig"))
+os.environ.setdefault("XDG_CACHE_HOME", os.path.join(os.getcwd(), ".cache"))
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import os
 import argparse 
 
 # --- SNN Model Definition (should match the one used for training) ---
@@ -145,8 +147,8 @@ if __name__ == '__main__':
     parser.add_argument('--grf_offset_sigma', type=float, default=0.5)
     parser.add_argument('--L_domain', type=float, default=2*np.pi) 
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
-    parser.add_argument('--fiber_potential_depth', type=float, default=0.5)
-    parser.add_argument('--grin_strength', type=float, default=0.01)
+    parser.add_argument('--fiber_potential_depth', type=float, default=1.0)
+    parser.add_argument('--grin_strength', type=float, default=0.1)
     parser.add_argument('--viscosity_nu', type=float, default=0.01)
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
@@ -158,6 +160,8 @@ if __name__ == '__main__':
                         help="If set, display plots interactively in addition to saving.")
 
     args = parser.parse_args()
+    np.random.seed(args.random_seed)
+    torch.manual_seed(args.random_seed)
 
     snn_input_res_val = args.n_grid_sim_input_ds
     snn_output_res_val = args.snn_output_res 
@@ -367,7 +371,8 @@ if __name__ == '__main__':
                     correction_term_this_sample = B_value_this_sample 
                 else: 
                     if snn_output_res_val > 0: 
-                        scaling_factor = (snn_output_res_val**2)**(-args.nu_theorem)
+                        cutoff_N = max(1, snn_output_res_val // 2)
+                        scaling_factor = cutoff_N**(-2 * args.nu_theorem)
                         correction_term_this_sample = B_value_this_sample * scaling_factor
                     else: 
                         correction_term_this_sample = float('inf') if B_value_this_sample > 1e-9 else 0.0
@@ -431,7 +436,7 @@ if __name__ == '__main__':
 
 
     if not np.isclose(args.nu_theorem, 0.0):
-             save_B_info_str += f"_scaled_by_NmaxNu"
+             save_B_info_str += f"_scaled_by_cutoffN"
 
     coverage_data_filename = os.path.join(args.results_dir, f"coverage_data{output_filename_suffix_calib}.npz") 
     np.savez_compressed(coverage_data_filename, 

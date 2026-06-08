@@ -1,16 +1,21 @@
 import numpy as np
-import matplotlib.pyplot as plt
 import os
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".mplconfig"))
+os.environ.setdefault("XDG_CACHE_HOME", os.path.join(os.getcwd(), ".cache"))
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import subprocess
 import argparse
 from itertools import product
 import multiprocessing
 import time
 import json
+import sys
 
 def run_script(script_name, args_list, log_prefix=""):
     """Helper function to run a python script with arguments."""
-    command = ["python", script_name] + [str(arg) for arg in args_list]
+    command = [sys.executable, script_name] + [str(arg) for arg in args_list]
     max_print_len = 2500
     command_str = ' '.join(command)
     if len(command_str) > max_print_len:
@@ -18,7 +23,10 @@ def run_script(script_name, args_list, log_prefix=""):
     
     print(f"{log_prefix}Executing: {command_str}")
     try:
-        process = subprocess.run(command, check=True, capture_output=True, text=True, timeout=5*10800) # 3-hour timeout
+        env = os.environ.copy()
+        env.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".mplconfig"))
+        env.setdefault("XDG_CACHE_HOME", os.path.join(os.getcwd(), ".cache"))
+        process = subprocess.run(command, check=True, capture_output=True, text=True, timeout=5*10800, env=env) # 3-hour timeout
         if process.stderr:
             stderr_lower = process.stderr.lower()
             if "error" in stderr_lower or "traceback" in stderr_lower or "warning" in stderr_lower:
@@ -96,11 +104,16 @@ def run_single_robust_opt(params_tuple):
             "--solver_num_steps", args.solver_num_steps,
             "--num_distinct_states_M", current_m_val,
             "--alpha_for_radius", args.alpha_for_radius,
+            "--quantum_radius_source", args.quantum_radius_source,
+            "--quantum_radius_scale", args.quantum_radius_scale,
             "--calibration_results_base_dir", args.calibration_results_base_dir,
             "--theorem_s", args.theorem_s,
             "--theorem_nu", args.theorem_nu,
             "--theorem_d", args.theorem_d,
             "--num_trials_per_config", args.num_trials_per_config,
+            "--max_pytorch_opt_epochs", args.max_pytorch_opt_epochs,
+            "--pytorch_lr", args.pytorch_lr,
+            "--seed", args.seed + exp_idx,
             "--results_dir", args.results_dir_rob_opt,
             "--output_json_filename_tag", f"sweep_run_alpha{current_grf_alpha}_M{current_m_val}_SNNres{current_snn_res}"
         ]
@@ -197,15 +210,24 @@ if __name__ == '__main__':
     parser.add_argument('--L_domain', type=float, default=2*np.pi)
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
     parser.add_argument('--fiber_potential_depth', type=float, default=1.0) 
-    parser.add_argument('--grin_strength', type=float, default=0.01)
+    parser.add_argument('--grin_strength', type=float, default=0.1)
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
     parser.add_argument('--alpha_for_radius', type=float, default=0.1)
+    parser.add_argument('--quantum_radius_source', type=str, default="avg_R",
+                        choices=["avg_R", "quantile", "sqrt_quantile"],
+                        help="Calibration quantity used as robust radius in robust_opt.py.")
+    parser.add_argument('--quantum_radius_scale', type=float, default=1.0,
+                        help="Multiplicative scale for the selected quantum radius.")
     parser.add_argument('--theorem_s', type=float, default=2.0)
     parser.add_argument('--theorem_nu', type=float, default=2.0)
     parser.add_argument('--theorem_d', type=int, default=2)
     parser.add_argument('--num_trials_per_config', type=int, default=50,
                         help="Number of trials per robust optimization run.")
+    parser.add_argument('--max_pytorch_opt_epochs', type=int, default=300)
+    parser.add_argument('--pytorch_lr', type=float, default=0.005)
+    parser.add_argument('--seed', type=int, default=0,
+                        help="Base random seed; configuration-specific seeds are derived deterministically.")
 
     parser.add_argument('--base_results_dir', type=str, default="sweep_results_rob_opt",
                         help="Base directory to store all results from this sweep.")

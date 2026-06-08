@@ -1,18 +1,21 @@
 import numpy as np
+import os
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".mplconfig"))
+os.environ.setdefault("XDG_CACHE_HOME", os.path.join(os.getcwd(), ".cache"))
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import os
 import subprocess
 import argparse
 from itertools import product
 import multiprocessing
 import time
 import json
+import sys
 
 def run_script(script_name, args_list, log_prefix=""):
     """Helper function to run a python script with arguments."""
-    command = ["python", script_name] + [str(arg) for arg in args_list]
+    command = [sys.executable, script_name] + [str(arg) for arg in args_list]
     max_print_len = 2500
     command_str = ' '.join(command)
     if len(command_str) > max_print_len:
@@ -20,7 +23,10 @@ def run_script(script_name, args_list, log_prefix=""):
     
     print(f"{log_prefix}Executing: {command_str}")
     try:
-        process = subprocess.run(command, check=True, capture_output=True, text=True, timeout=10800) # 3-hour timeout
+        env = os.environ.copy()
+        env.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".mplconfig"))
+        env.setdefault("XDG_CACHE_HOME", os.path.join(os.getcwd(), ".cache"))
+        process = subprocess.run(command, check=True, capture_output=True, text=True, timeout=10800, env=env) # 3-hour timeout
         if process.stderr:
             stderr_lower = process.stderr.lower()
             if "error" in stderr_lower or "traceback" in stderr_lower or "warning" in stderr_lower:
@@ -90,7 +96,8 @@ def run_single_calibration_pipeline(params_tuple):
             "--n_grid_sim_input", str(args.n_grid_sim_input_ds), 
             "--k_psi0_limit", str(args.k_psi0_limit_dataset), 
             "--k_trunc_snn_output", str(k_snn_output_res), 
-            "--output_dir", args.dataset_dir
+            "--output_dir", args.dataset_dir,
+            "--seed", str(args.seed + exp_idx)
         ]
         if not run_script(data_gen_script, data_gen_args_list, log_prefix):
             print(f"{log_prefix}Data generation FAILED for {dataset_filename}. Returning None.")
@@ -110,6 +117,7 @@ def run_single_calibration_pipeline(params_tuple):
             "--snn_hidden_channels", str(args.snn_hidden_channels),
             "--snn_num_hidden_layers", str(args.snn_num_hidden_layers), 
             "--epochs", str(args.snn_epochs),
+            "--seed", str(args.seed + exp_idx)
         ]
         if not run_script(snn_train_script, train_args_list, log_prefix):
             print(f"{log_prefix}SNN training FAILED for {snn_model_filename}. Returning None.")
@@ -135,6 +143,7 @@ def run_single_calibration_pipeline(params_tuple):
         "--L_domain", str(args.L_domain), 
         "--evolution_time_T", str(args.evolution_time_T),
         "--solver_num_steps", str(args.solver_num_steps),
+        "--random_seed", str(args.seed + exp_idx),
         "--no_plot" 
     ]
     if not run_script(conformal_calib_script, calib_args_list, log_prefix):
@@ -187,8 +196,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--L_domain', type=float, default=2*np.pi)
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
-    parser.add_argument('--fiber_potential_depth', type=float, default=0.5) 
-    parser.add_argument('--grin_strength', type=float, default=0.01)
+    parser.add_argument('--fiber_potential_depth', type=float, default=1.0) 
+    parser.add_argument('--grin_strength', type=float, default=0.1)
     parser.add_argument('--viscosity_nu', type=float, default=0.01)
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
@@ -206,6 +215,8 @@ if __name__ == '__main__':
     parser.add_argument('--skip_snn_train', action='store_true')
     parser.add_argument('--skip_completed_calib_runs', action='store_true') 
     parser.add_argument('--num_processes', type=int, default=min(os.cpu_count(), 4))
+    parser.add_argument('--seed', type=int, default=0,
+                        help="Base random seed; configuration-specific seeds are derived deterministically.")
 
     args = parser.parse_args()
 

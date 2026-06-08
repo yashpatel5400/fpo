@@ -3,10 +3,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader, random_split
+import os
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".mplconfig"))
+os.environ.setdefault("XDG_CACHE_HOME", os.path.join(os.getcwd(), ".cache"))
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import os
 import argparse 
 
 # --- SNN Model Definition ---
@@ -219,6 +221,8 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--val_split', type=float, default=0.2)
+    parser.add_argument('--seed', type=int, default=0,
+                        help="Random seed for train/validation split, model initialization, and minibatch order.")
     
     # --- Output Directories ---
     parser.add_argument('--model_save_dir', type=str, default="trained_snn_models")
@@ -233,13 +237,15 @@ if __name__ == '__main__':
                         help="Sigma for hierarchical offset in Poisson source (f term).")
     parser.add_argument('--L_domain', type=float, default=2*np.pi) 
     parser.add_argument('--fiber_core_radius_factor', type=float, default=0.2)
-    parser.add_argument('--fiber_potential_depth', type=float, default=0.5)
-    parser.add_argument('--grin_strength', type=float, default=0.01)
+    parser.add_argument('--fiber_potential_depth', type=float, default=1.0)
+    parser.add_argument('--grin_strength', type=float, default=0.1)
     parser.add_argument('--viscosity_nu', type=float, default=0.01)
     parser.add_argument('--evolution_time_T', type=float, default=0.1) 
     parser.add_argument('--solver_num_steps', type=int, default=50) 
     
     args = parser.parse_args()
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
     
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     os.makedirs(args.model_save_dir, exist_ok=True)
@@ -281,7 +287,8 @@ if __name__ == '__main__':
         args.n_grid_sim_input_ds, 
         args.k_snn_target_res,    
         args.batch_size, 
-        val_split=args.val_split
+        val_split=args.val_split,
+        random_seed=args.seed
     )
 
     if train_loader is None:
