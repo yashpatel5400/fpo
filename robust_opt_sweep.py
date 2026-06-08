@@ -113,6 +113,7 @@ def run_single_robust_opt(params_tuple):
             "--num_trials_per_config", args.num_trials_per_config,
             "--max_pytorch_opt_epochs", args.max_pytorch_opt_epochs,
             "--pytorch_lr", args.pytorch_lr,
+            "--robust_phase_init_mode", args.robust_phase_init_mode,
             "--seed", args.seed + exp_idx,
             "--results_dir", args.results_dir_rob_opt,
             "--output_json_filename_tag", f"sweep_run_alpha{current_grf_alpha}_M{current_m_val}_SNNres{current_snn_res}"
@@ -226,6 +227,9 @@ if __name__ == '__main__':
                         help="Number of trials per robust optimization run.")
     parser.add_argument('--max_pytorch_opt_epochs', type=int, default=300)
     parser.add_argument('--pytorch_lr', type=float, default=0.005)
+    parser.add_argument('--robust_phase_init_mode', type=str, default="random",
+                        choices=["random", "same_random", "nominal"],
+                        help="Initialization protocol for robust phase optimization.")
     parser.add_argument('--seed', type=int, default=0,
                         help="Base random seed; configuration-specific seeds are derived deterministically.")
 

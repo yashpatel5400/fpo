@@ -26,7 +26,8 @@ All commands below are run from the `fpo/` directory. The local replication was 
 - Added a cached-grid implementation in the collection optimizer to avoid rebuilding static FFT/spatial grids every Adam step.
 - Added a `--resource_transform` option to collection experiments for probes of signed, positive-part, and absolute-value resource fields. The default remains `real`.
 - Added quantum robust-radius controls: `--quantum_radius_source` and `--quantum_radius_scale`.
-- Added pass-through sweep arguments for quantum optimizer epochs, learning rate, and radius settings.
+- Added pass-through sweep arguments for quantum optimizer epochs, learning rate, radius settings, and robust phase initialization.
+- Added per-trial quantum mutual-information outputs to the saved JSON files so paired tests are auditable.
 
 ## Functional Coverage
 
@@ -78,16 +79,16 @@ The theorem-level `avg_R` radius is too conservative for the quantum optimizer a
 Step-index fiber:
 
 ```bash
-$PY robust_opt_sweep.py --pde_type step_index_fiber --grf_alpha_values 1.5 1.75 --num_distinct_states_M_values 3 4 --snn_output_res_values 32 48 --snn_model_dir replication_runs/functional_coverage/models --calibration_results_base_dir replication_runs/functional_coverage/calibration --n_grid_sim_input_ds 64 --num_trials_per_config 30 --max_pytorch_opt_epochs 80 --pytorch_lr 0.005 --alpha_for_radius 0.1 --quantum_radius_source quantile --quantum_radius_scale 0.5 --base_results_dir replication_runs/quantum/step_index --num_processes 4 --seed 800
+$PY robust_opt_sweep.py --pde_type step_index_fiber --grf_alpha_values 1.5 1.75 --num_distinct_states_M_values 3 4 --snn_output_res_values 32 48 --snn_model_dir replication_runs/functional_coverage/models --calibration_results_base_dir replication_runs/functional_coverage/calibration --n_grid_sim_input_ds 64 --num_trials_per_config 30 --max_pytorch_opt_epochs 300 --pytorch_lr 0.005 --alpha_for_radius 0.1 --quantum_radius_source quantile --quantum_radius_scale 0.5 --robust_phase_init_mode random --base_results_dir replication_runs/quantum/step_index_epochs300 --num_processes 4 --seed 1200
 ```
 
 GRIN fiber:
 
 ```bash
-$PY robust_opt_sweep.py --pde_type grin_fiber --grf_alpha_values 1.5 1.75 --num_distinct_states_M_values 3 4 --snn_output_res_values 32 48 --snn_model_dir replication_runs/functional_coverage/models --calibration_results_base_dir replication_runs/functional_coverage/calibration --n_grid_sim_input_ds 64 --num_trials_per_config 30 --max_pytorch_opt_epochs 80 --pytorch_lr 0.005 --alpha_for_radius 0.1 --quantum_radius_source quantile --quantum_radius_scale 0.5 --base_results_dir replication_runs/quantum/grin --num_processes 4 --seed 900
+$PY robust_opt_sweep.py --pde_type grin_fiber --grf_alpha_values 1.5 1.75 --num_distinct_states_M_values 3 4 --snn_output_res_values 32 48 --snn_model_dir replication_runs/functional_coverage/models --calibration_results_base_dir replication_runs/functional_coverage/calibration --n_grid_sim_input_ds 64 --num_trials_per_config 30 --max_pytorch_opt_epochs 300 --pytorch_lr 0.005 --alpha_for_radius 0.1 --quantum_radius_source quantile --quantum_radius_scale 0.5 --robust_phase_init_mode random --base_results_dir replication_runs/quantum/grin_epochs300 --num_processes 4 --seed 1300
 ```
 
-Observed result: robust mutual information is strongly above PGM for every row. Robust is slightly above nominal for most rows, but the robust-vs-nominal gap is smaller than in the manuscript table under these regenerated models.
+Observed result: with 300 phase-optimization epochs, robust mutual information is above both PGM and nominal in every row, and every paired robust-vs-nominal p-value is below `0.001`. The earlier 80-epoch exploratory runs were under-optimized and produced much smaller robust-vs-nominal gaps.
 
 ## Notes
 

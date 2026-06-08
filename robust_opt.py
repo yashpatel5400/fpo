@@ -410,11 +410,42 @@ def main(args):
         I_AB_pgm_on_true = calculate_I_AB_numpy(phi_pgm_np, args.num_distinct_states_M, sqrt_g_j_true_np, args.priors_q_j, target_device_str=str(DEVICE))
         pgm_IAB_on_true_trials.append(I_AB_pgm_on_true) 
 
-        phi_nom_opt_np, _ = optimize_phases_pytorch(args.num_distinct_states_M, x_estimated_torch, q_priors_torch, target_device_obj=DEVICE, is_robust=False, num_epochs=args.max_pytorch_opt_epochs, lr=args.pytorch_lr)
+        num_phases_to_opt = args.num_distinct_states_M - 1
+        shared_initial_phases_np = None
+        if args.robust_phase_init_mode == "same_random" and num_phases_to_opt > 0:
+            shared_initial_phases_np = (np.random.rand(num_phases_to_opt) - 0.5) * 0.1
+
+        phi_nom_opt_np, _ = optimize_phases_pytorch(
+            args.num_distinct_states_M,
+            x_estimated_torch,
+            q_priors_torch,
+            target_device_obj=DEVICE,
+            is_robust=False,
+            num_epochs=args.max_pytorch_opt_epochs,
+            lr=args.pytorch_lr,
+            initial_phases_np=shared_initial_phases_np,
+        )
         I_AB_phi_nom_on_true = calculate_I_AB_numpy(phi_nom_opt_np, args.num_distinct_states_M, sqrt_g_j_true_np, args.priors_q_j, target_device_str=str(DEVICE))
         nominal_IAB_on_true_trials.append(I_AB_phi_nom_on_true)
 
-        phi_rob_opt_np, _ = optimize_phases_pytorch(args.num_distinct_states_M, x_estimated_torch, q_priors_torch, target_device_obj=DEVICE, is_robust=True, x_center_for_robust_np=sqrt_g_j_estimated_np, L2_ball_radius_for_robust=L2_ball_radius_calculated, num_epochs=args.max_pytorch_opt_epochs, lr=args.pytorch_lr) 
+        robust_initial_phases_np = None
+        if args.robust_phase_init_mode == "same_random":
+            robust_initial_phases_np = shared_initial_phases_np
+        elif args.robust_phase_init_mode == "nominal":
+            robust_initial_phases_np = phi_nom_opt_np[1:]
+
+        phi_rob_opt_np, _ = optimize_phases_pytorch(
+            args.num_distinct_states_M,
+            x_estimated_torch,
+            q_priors_torch,
+            target_device_obj=DEVICE,
+            is_robust=True,
+            x_center_for_robust_np=sqrt_g_j_estimated_np,
+            L2_ball_radius_for_robust=L2_ball_radius_calculated,
+            num_epochs=args.max_pytorch_opt_epochs,
+            lr=args.pytorch_lr,
+            initial_phases_np=robust_initial_phases_np,
+        ) 
         I_AB_phi_rob_on_true = calculate_I_AB_numpy(phi_rob_opt_np, args.num_distinct_states_M, sqrt_g_j_true_np, args.priors_q_j, target_device_str=str(DEVICE))
         robust_IAB_on_true_trials.append(I_AB_phi_rob_on_true)
         
@@ -461,7 +492,10 @@ def main(args):
         "p_value_nom_gt_pgm": float(p_nom_pgm),
         "t_statistic_rob_gt_pgm": float(t_rob_pgm), 
         "p_value_rob_gt_pgm": float(p_rob_pgm),
-        "L2_ball_radius_used_for_robust_opt": L2_ball_radius_calculated 
+        "L2_ball_radius_used_for_robust_opt": L2_ball_radius_calculated,
+        "pgm_IAB_on_true_trials": [float(x) for x in pgm_IAB_on_true_trials],
+        "nominal_IAB_on_true_trials": [float(x) for x in nominal_IAB_on_true_trials],
+        "robust_IAB_on_true_trials": [float(x) for x in robust_IAB_on_true_trials],
     }
     
     if 'delta_n_vector_gus_components' in results['params']: 
@@ -557,6 +591,9 @@ if __name__ == '__main__':
     parser.add_argument('--num_trials_per_config', type=int, default=30) 
     parser.add_argument('--max_pytorch_opt_epochs', type=int, default=300)
     parser.add_argument('--pytorch_lr', type=float, default=0.005)
+    parser.add_argument('--robust_phase_init_mode', type=str, default="random",
+                        choices=["random", "same_random", "nominal"],
+                        help="Initialization protocol for robust phase optimization.")
     parser.add_argument('--priors_q_j', nargs='+', type=float, default=None) 
     parser.add_argument('--seed', type=int, default=0,
                         help="Random seed for GRF state sampling and phase optimization initialization.")
