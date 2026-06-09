@@ -337,6 +337,7 @@ def optimize_softmask_adam(
     return_mask: bool = False,
     use_robust: bool = True,
     init_centers: list | None = None,
+    robust_sign: float = 1.0,
 ):
     """
     Gradient ascent on centers (continuous) using soft torus masks.
@@ -373,7 +374,7 @@ def optimize_softmask_adam(
 
             if use_robust and r_radius > 0.0:
                 dual = sobolev_dual_norm(M, s_minus_nu, weights=dual_weights)
-                obj = nominal + r_radius * dual
+                obj = nominal + robust_sign * r_radius * dual
             else:
                 obj = nominal
 
@@ -389,7 +390,7 @@ def optimize_softmask_adam(
             nominal = (u * M).sum()
             if use_robust and r_radius > 0.0:
                 dual = sobolev_dual_norm(M, s_minus_nu, weights=dual_weights)
-                val = (nominal + r_radius * dual).item()
+                val = (nominal + robust_sign * r_radius * dual).item()
             else:
                 val = nominal.item()
 
@@ -441,11 +442,18 @@ def main():
     p.add_argument('--s_theorem', type=float, default=2.0)
     p.add_argument('--nu_theorem', type=float, default=2.0)
     p.add_argument('--alpha_for_radius', type=float, default=0.10, help='Pick q for this alpha')
+    p.add_argument('--collection_radius_scale', type=float, default=1.0,
+                   help='Multiplicative scale applied to the calibrated collection robust radius.')
+    p.add_argument('--collection_robust_sign', type=str, default="plus",
+                   choices=["plus", "minus"],
+                   help='Use nominal +/- radius*dual_norm for the collection robust objective.')
 
     # collection settings
     p.add_argument('--K_facilities', type=int, default=3)
     p.add_argument('--radius_px', type=int, default=6)
     p.add_argument('--iters', type=int, default=800)
+    p.add_argument('--collection_restarts', type=int, default=3,
+                   help='Number of random restarts for the initial collection optimization stage.')
     p.add_argument('--step_px', type=int, default=3)
     p.add_argument('--trials', type=int, default=30)
     p.add_argument('--seed', type=int, default=0)
@@ -454,6 +462,9 @@ def main():
     p.add_argument('--resource_transform', type=str, default="real",
                    choices=["real", "abs", "positive"],
                    help='Transform real-valued PDE fields before resource collection.')
+    p.add_argument('--eval_field', type=str, default="full",
+                   choices=["full", "truncated"],
+                   help='Evaluate decisions on the full true field or the Nout-truncated true field padded to full resolution.')
 
     # bootstrap (optional CI)
     p.add_argument('--bootstrap_samples', type=int, default=0, help='If >0, compute bootstrap CI for mean diff (e.g., 5000)')
@@ -507,6 +518,7 @@ def main():
     # use the calib split for “holdout” in this experiment (consistent with calibration.py)
     Gb = data['gamma_b_calib']                      # (M, Nin, Nin) complex
     Ga_true_full = data['gamma_a_true_full_calib']  # (M, Nin, Nin) complex
+    Ga_true_target = data.get('gamma_a_snn_target_calib')
     M = Gb.shape[0]
     N = args.n_grid_sim_input_ds
 
@@ -551,6 +563,7 @@ def main():
         idx = int(np.argmin(np.abs(alphas_used - args.alpha_for_radius)))
         q = float(q_arr[idx])
         r_radius = float(np.sqrt(max(q, 0.0)))
+        r_radius *= args.collection_radius_scale
         print(f"[calibration] loaded: {calib_npz_path}")
         print(f"[calibration] alpha≈{alphas_used[idx]:.2f} -> q={q:.3e} -> r={r_radius:.3e}")
     else:
@@ -596,7 +609,12 @@ def main():
             u_tilde_real = np.abs(u_tilde)
 
         # true field
-        ga_full_centered = Ga_true_full[i]  # (N,N) complex
+        if args.eval_field == "truncated":
+            if Ga_true_target is None:
+                raise KeyError("Dataset does not contain gamma_a_snn_target_calib for truncated evaluation.")
+            ga_full_centered = pad_to_full_centered(Ga_true_target[i], N)
+        else:
+            ga_full_centered = Ga_true_full[i]  # (N,N) complex
         u_true = spec_to_spatial_centered(ga_full_centered)
         if args.pde_type in ['poisson', 'heat_equation']:
             u_true_real = transform_resource_field(u_true, args.resource_transform)
@@ -625,14 +643,15 @@ def main():
                     radius_px=radius_stage,
                     r_radius=r_radius_stage,
                     s_minus_nu=s_minus_nu,
-                    steps=max(200, int(600 / f)),  # fewer steps on coarser grids
+                    steps=max(200, int(args.iters / f)),
                     lr=0.15,
                     tau=1.5,
-                    restarts=1 if init_stage is not None else 3,
+                    restarts=1 if init_stage is not None else args.collection_restarts,
                     seed=trial_seed,
                     device="cuda" if torch.cuda.is_available() else "cpu",
                     use_robust=(r_radius_stage > 0),
                     init_centers=init_stage,
+                    robust_sign=1.0 if args.collection_robust_sign == "plus" else -1.0,
                 )
                 centers_prev = centers_stage
                 factor_prev = f
@@ -761,7 +780,10 @@ def main():
         "sign_test_two_sided_p": p_sign_two_sided,
         "bootstrap_ci_95": [ci_lo, ci_hi] if ci_lo is not None else None,
         "alpha_for_radius": args.alpha_for_radius,
-        "r_radius": r_radius
+        "r_radius": r_radius,
+        "collection_radius_scale": args.collection_radius_scale,
+        "collection_robust_sign": args.collection_robust_sign,
+        "eval_field": args.eval_field
     }
     with open(out_base + "_stats.json", "w") as f:
         json.dump(stats_payload, f, indent=2)

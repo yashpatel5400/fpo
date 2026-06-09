@@ -161,13 +161,17 @@ def worker_run_shard(params):
         "--results_out", shard_out_dir,
         "--trials", shard_trials,
         "--iters", a.iters,
+        "--collection_restarts", a.collection_restarts,
         "--K_facilities", a.K_facilities,
         "--radius_px", a.radius_px,
         "--step_px", a.step_px,
         "--seed", shard_seed,
         "--alpha_for_radius", a.alpha_for_radius,
+        "--collection_radius_scale", a.collection_radius_scale,
+        "--collection_robust_sign", a.collection_robust_sign,
         "--multi_stage_factors", a.multi_stage_factors,
         "--resource_transform", a.resource_transform,
+        "--eval_field", a.eval_field,
         "--s_theorem", a.s_theorem,
         "--nu_theorem", a.nu_theorem,
         "--snn_hidden_channels", a.snn_hidden_channels,
@@ -253,6 +257,8 @@ if __name__ == "__main__":
 
     ap.add_argument('--trials', type=int, default=200, help='Total trials per configuration (will be sharded)')
     ap.add_argument('--iters', type=int, default=800)
+    ap.add_argument('--collection_restarts', type=int, default=3,
+                    help='Number of random restarts for the initial collection optimization stage.')
     ap.add_argument('--K_facilities', type=int, default=3)
     ap.add_argument('--radius_px', type=int, default=6)
     ap.add_argument('--step_px', type=int, default=3)
@@ -262,8 +268,16 @@ if __name__ == "__main__":
     ap.add_argument('--resource_transform', type=str, default="real",
                     choices=["real", "abs", "positive"],
                     help='Transform real-valued PDE fields before resource collection.')
+    ap.add_argument('--eval_field', type=str, default="full",
+                    choices=["full", "truncated"],
+                    help='Evaluate decisions on the full true field or the Nout-truncated true field.')
 
     ap.add_argument('--alpha_for_radius', type=float, default=0.10)
+    ap.add_argument('--collection_radius_scale', type=float, default=1.0,
+                    help='Multiplicative scale applied to the calibrated collection robust radius.')
+    ap.add_argument('--collection_robust_sign', type=str, default="plus",
+                    choices=["plus", "minus"],
+                    help='Use nominal +/- radius*dual_norm for the collection robust objective.')
     ap.add_argument('--s_theorem', type=float, default=2.0)
     ap.add_argument('--nu_theorem', type=float, default=2.0)
 
@@ -402,6 +416,9 @@ if __name__ == "__main__":
         "evolution_time_T": getattr(args, "evolution_time_T", None),
         "viscosity_nu": getattr(args, "viscosity_nu", None),
         "alpha_for_radius": args.alpha_for_radius,
+        "collection_radius_scale": args.collection_radius_scale,
+        "collection_robust_sign": args.collection_robust_sign,
+        "eval_field": args.eval_field,
         "results": serializable_results,
     }
     try:
