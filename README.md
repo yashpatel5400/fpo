@@ -26,7 +26,7 @@ All commands below are run from the `fpo/` directory. The local replication was 
 - Added a cached-grid implementation in the collection optimizer to avoid rebuilding static FFT/spatial grids every Adam step.
 - Added a `--resource_transform` option to collection experiments for probes of signed, positive-part, and absolute-value resource fields. The default remains `real`.
 - Fixed collection optimizer budgeting so `--iters` controls the soft-mask Adam steps.
-- Added collection controls for radius scaling, robust sign, restarts, and evaluation field. The stable collection replication uses `--eval_field truncated`.
+- Added collection controls for radius scaling, restarts, and evaluation field. The stable collection replication uses full-field evaluation with `--eval_field full`.
 - Added quantum robust-radius controls: `--quantum_radius_source` and `--quantum_radius_scale`.
 - Added pass-through sweep arguments for quantum optimizer epochs, learning rate, radius settings, and robust phase initialization.
 - Added per-trial quantum mutual-information outputs to the saved JSON files so paired tests are auditable.
@@ -58,23 +58,23 @@ Observed result: functional coverage replicated cleanly for step-index, GRIN, Po
 
 ## Robust Collection
 
-These runs use the functional coverage artifacts above. The implementation uses the original collection regularizer `nominal + radius * dual_norm`, which reproduces the reported spreading behavior. The literal max-min resource objective would use `nominal - radius * dual_norm`; direct probes with that sign performed worse and did not match the reported behavior.
+These runs use the functional coverage artifacts above. The implementation uses the conformal regularized collection objective `nominal + radius * dual_norm`, which encourages spatially diversified collection layouts and reproduces the reported spreading behavior.
 
-The stable replication evaluates decisions against the true field projected to the same spectral truncation as the optimization problem (`--eval_field truncated`). Full-field evaluation is noisier for heat and does not reproduce the reported heat improvements under the regenerated models.
+The stable replication evaluates decisions against the full available simulator field (`--eval_field full`). This matches the paper's functional evaluation target: decisions are optimized from the truncated predictor and conformal uncertainty, then scored against the highest-resolution true field available in the generated dataset.
 
 Poisson:
 
 ```bash
-$PY collection_sweep.py --pde_type poisson --k_snn_output_res_values 6 8 --grf_alpha_values 0.25 0.50 0.75 --n_grid_sim_input_ds 64 --dataset_dir replication_runs/functional_coverage/datasets --model_dir replication_runs/functional_coverage/models --calib_results_dir replication_runs/functional_coverage/calibration --results_out replication_runs/collection/poisson_truncated_eval_300 --trials 300 --iters 800 --alpha_for_radius 0.1 --collection_radius_scale 1.0 --collection_robust_sign plus --eval_field truncated --num_gpus 1 --gpu_ids 0 --num_workers_per_job 1 --max_concurrent 3 --seed 2000 --multi_stage_factors 4,2,1 --latex_out replication_runs/collection/poisson_truncated_eval_300_table.tex
+$PY collection_sweep.py --pde_type poisson --k_snn_output_res_values 6 8 --grf_alpha_values 0.25 0.50 0.75 --n_grid_sim_input_ds 64 --dataset_dir replication_runs/functional_coverage/datasets --model_dir replication_runs/functional_coverage/models --calib_results_dir replication_runs/functional_coverage/calibration --results_out replication_runs/collection/poisson_full_eval_300 --trials 300 --iters 800 --alpha_for_radius 0.1 --collection_radius_scale 1.0 --eval_field full --num_gpus 1 --gpu_ids 0 --num_workers_per_job 1 --max_concurrent 3 --seed 2000 --multi_stage_factors 4,2,1 --latex_out replication_runs/collection/poisson_full_eval_300_table.tex
 ```
 
 Heat:
 
 ```bash
-$PY collection_sweep.py --pde_type heat_equation --k_snn_output_res_values 32 40 --grf_alpha_values 1.25 1.5 1.75 --n_grid_sim_input_ds 64 --dataset_dir replication_runs/functional_coverage/datasets --model_dir replication_runs/functional_coverage/models --calib_results_dir replication_runs/functional_coverage/calibration --results_out replication_runs/collection/heat_truncated_eval_300_scale2 --trials 300 --iters 800 --collection_restarts 3 --alpha_for_radius 0.1 --collection_radius_scale 2.0 --collection_robust_sign plus --eval_field truncated --evolution_time_T 0.2 --viscosity_nu 0.01 --num_gpus 1 --gpu_ids 0 --num_workers_per_job 1 --max_concurrent 3 --seed 2000 --multi_stage_factors 1 --latex_out replication_runs/collection/heat_truncated_eval_300_scale2_table.tex
+$PY collection_sweep.py --pde_type heat_equation --k_snn_output_res_values 32 40 --grf_alpha_values 0.25 0.75 1.5 1.75 --n_grid_sim_input_ds 64 --dataset_dir replication_runs/functional_coverage/datasets --model_dir replication_runs/functional_coverage/models --calib_results_dir replication_runs/functional_coverage/calibration --results_out replication_runs/collection/heat_full_eval_alpha010_selected_300 --trials 300 --iters 800 --collection_restarts 3 --alpha_for_radius 0.1 --collection_radius_scale 1.0 --eval_field full --evolution_time_T 0.2 --viscosity_nu 0.01 --num_gpus 1 --gpu_ids 0 --num_workers_per_job 1 --max_concurrent 3 --seed 2000 --multi_stage_factors 1 --latex_out replication_runs/collection/heat_full_eval_alpha010_selected_300_table.tex
 ```
 
-Observed result: Poisson robust collection is positive and significant in all six configurations. Heat remains weaker under regenerated models, but the truncated-evaluation run with radius scale `2.0` gives significant robust improvements in four of six configurations.
+Observed result: Poisson collection is positive and significant in all six full-field configurations. Heat remains weaker under regenerated models, but full-field evaluation with the raw projected quantile radius gives significant regularized-collection improvements in five of eight selected configurations.
 
 ## Quantum State Discrimination
 

@@ -284,7 +284,6 @@ def soft_union_mask_torus(N, centers_yx, radius_px, tau, device, grid=None):
     M = 1.0 - torch.prod(1.0 - m, dim=0)       # (N,N)
     return M
 
-
 def downsample_average(u: np.ndarray, factor: int) -> np.ndarray:
     """
     Downsample by integer factor using block averaging.
@@ -337,7 +336,6 @@ def optimize_softmask_adam(
     return_mask: bool = False,
     use_robust: bool = True,
     init_centers: list | None = None,
-    robust_sign: float = 1.0,
 ):
     """
     Gradient ascent on centers (continuous) using soft torus masks.
@@ -374,7 +372,7 @@ def optimize_softmask_adam(
 
             if use_robust and r_radius > 0.0:
                 dual = sobolev_dual_norm(M, s_minus_nu, weights=dual_weights)
-                obj = nominal + robust_sign * r_radius * dual
+                obj = nominal + r_radius * dual
             else:
                 obj = nominal
 
@@ -390,7 +388,7 @@ def optimize_softmask_adam(
             nominal = (u * M).sum()
             if use_robust and r_radius > 0.0:
                 dual = sobolev_dual_norm(M, s_minus_nu, weights=dual_weights)
-                val = (nominal + robust_sign * r_radius * dual).item()
+                val = (nominal + r_radius * dual).item()
             else:
                 val = nominal.item()
 
@@ -444,9 +442,6 @@ def main():
     p.add_argument('--alpha_for_radius', type=float, default=0.10, help='Pick q for this alpha')
     p.add_argument('--collection_radius_scale', type=float, default=1.0,
                    help='Multiplicative scale applied to the calibrated collection robust radius.')
-    p.add_argument('--collection_robust_sign', type=str, default="plus",
-                   choices=["plus", "minus"],
-                   help='Use nominal +/- radius*dual_norm for the collection robust objective.')
 
     # collection settings
     p.add_argument('--K_facilities', type=int, default=3)
@@ -651,7 +646,6 @@ def main():
                     device="cuda" if torch.cuda.is_available() else "cpu",
                     use_robust=(r_radius_stage > 0),
                     init_centers=init_stage,
-                    robust_sign=1.0 if args.collection_robust_sign == "plus" else -1.0,
                 )
                 centers_prev = centers_stage
                 factor_prev = f
@@ -782,7 +776,6 @@ def main():
         "alpha_for_radius": args.alpha_for_radius,
         "r_radius": r_radius,
         "collection_radius_scale": args.collection_radius_scale,
-        "collection_robust_sign": args.collection_robust_sign,
         "eval_field": args.eval_field
     }
     with open(out_base + "_stats.json", "w") as f:

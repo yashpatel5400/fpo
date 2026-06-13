@@ -168,7 +168,6 @@ def worker_run_shard(params):
         "--seed", shard_seed,
         "--alpha_for_radius", a.alpha_for_radius,
         "--collection_radius_scale", a.collection_radius_scale,
-        "--collection_robust_sign", a.collection_robust_sign,
         "--multi_stage_factors", a.multi_stage_factors,
         "--resource_transform", a.resource_transform,
         "--eval_field", a.eval_field,
@@ -275,9 +274,6 @@ if __name__ == "__main__":
     ap.add_argument('--alpha_for_radius', type=float, default=0.10)
     ap.add_argument('--collection_radius_scale', type=float, default=1.0,
                     help='Multiplicative scale applied to the calibrated collection robust radius.')
-    ap.add_argument('--collection_robust_sign', type=str, default="plus",
-                    choices=["plus", "minus"],
-                    help='Use nominal +/- radius*dual_norm for the collection robust objective.')
     ap.add_argument('--s_theorem', type=float, default=2.0)
     ap.add_argument('--nu_theorem', type=float, default=2.0)
 
@@ -417,7 +413,6 @@ if __name__ == "__main__":
         "viscosity_nu": getattr(args, "viscosity_nu", None),
         "alpha_for_radius": args.alpha_for_radius,
         "collection_radius_scale": args.collection_radius_scale,
-        "collection_robust_sign": args.collection_robust_sign,
         "eval_field": args.eval_field,
         "results": serializable_results,
     }
