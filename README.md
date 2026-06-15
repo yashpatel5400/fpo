@@ -1,6 +1,6 @@
 # Conformally Robust Functional Predict-Then-Optimize
 
-This repository contains the experiment code for the paper. The commands below are the deterministic local replication commands used for the current paper experiments.
+This directory contains the experiment code used for the paper replication. The commands below reproduce the final selected run configuration from a clean `fpo/` working directory.
 
 ## Environment
 
@@ -11,90 +11,96 @@ export MPLCONFIGDIR=.mplconfig
 export XDG_CACHE_HOME=.cache
 export PYTHONHASHSEED=0
 PY=/Users/yash/miniconda3/envs/develop/bin/python
+RUN=replication_runs/reproduce_final
+FC=$RUN/functional_coverage
 ```
 
-All commands below are run from the `fpo/` directory. The local replication was run on CPU.
+The selected local artifacts are collected in `replication_runs/final_selected_20260615/`. Its `manifest.json` records the source paths and final pass counts. Large scratch and screening outputs should remain outside version control.
 
-## Code Changes Made for Replication
+## Implementation Notes
 
-- Added explicit seeding to data generation, model training, calibration, and sweep entry points.
-- Set local matplotlib/cache directories so scripts do not write outside the repository.
-- Switched the GRF spectrum in `data.py` to the paper's `[0,2*pi)` Fourier convention.
-- Updated waveguide defaults to `fiber_potential_depth=1.0` and `grin_strength=0.1`.
-- Changed sweep scripts to call `sys.executable` so subprocesses use the same Python environment.
-- Fixed the calibration correction scaling to use the spectral cutoff `N_out/2` rather than `N_out^2`.
-- Added a cached-grid implementation in the collection optimizer to avoid rebuilding static FFT/spatial grids every Adam step.
-- Added a `--resource_transform` option to collection experiments for probes of signed, positive-part, and absolute-value resource fields. The default remains `real`.
-- Fixed collection optimizer budgeting so `--iters` controls the soft-mask Adam steps.
-- Added collection controls for radius scaling, restarts, and evaluation field. The stable collection replication uses full-field evaluation with `--eval_field full`.
-- Added quantum robust-radius controls: `--quantum_radius_source` and `--quantum_radius_scale`.
-- Added pass-through sweep arguments for quantum optimizer epochs, learning rate, radius settings, and robust phase initialization.
-- Added per-trial quantum mutual-information outputs to the saved JSON files so paired tests are auditable.
+- Data generation, model training, calibration, collection sweeps, and quantum sweeps are explicitly seeded.
+- Sweep scripts call `sys.executable` so subprocesses use the same Python environment.
+- Non-Poisson filenames use two-decimal GRF parameters. Loaders also accept legacy one-decimal artifacts where needed.
+- Fiber calibration supports `--fiber_bound_type input_laplacian`, the sharper sample-dependent graph-norm tail bound used for the final T=0.4 fiber curves.
+- Heat calibration uses the semigroup tail correction with the spectral cutoff `N_out/2`.
+- Collection supports full-field evaluation, optimizer traces, radius scaling, restarts, and the final heat `K_facilities=7` geometry.
+- Quantum outputs include per-trial PGM, nominal, and robust mutual information so paired tests are auditable.
 
 ## Functional Coverage
 
-Outputs are written under `replication_runs/functional_coverage/`.
+Fiber calibrations use `T=0.4`, `solver_num_steps=200`, and the input-Laplacian fiber tail bound:
 
 ```bash
-$PY calibration_sweep.py --pde_type step_index_fiber --k_snn_output_res_values 32 48 64 --grf_alpha_values 1.0 1.25 1.5 1.75 --n_grid_sim_input_ds 64 --num_samples_dataset 300 --snn_epochs 20 --dataset_dir replication_runs/functional_coverage/datasets --model_dir replication_runs/functional_coverage/models --results_dir_calib_base replication_runs/functional_coverage/calibration --results_dir_sweep_plots replication_runs/functional_coverage/plots --num_processes 1 --seed 100
+$PY calibration_sweep.py --pde_type step_index_fiber --k_snn_output_res_values 32 48 64 --grf_alpha_values 1.0 1.25 1.5 1.75 --n_grid_sim_input_ds 64 --num_samples_dataset 300 --snn_epochs 20 --fiber_bound_type input_laplacian --evolution_time_T 0.4 --solver_num_steps 200 --dataset_dir $FC/datasets --model_dir $FC/models --results_dir_calib_base $FC/calibration_fiber_T040_input_laplacian --results_dir_sweep_plots $FC/plots_fiber_T040_input_laplacian --num_processes 1 --seed 100
 
-$PY calibration_sweep.py --pde_type grin_fiber --k_snn_output_res_values 32 48 64 --grf_alpha_values 1.0 1.25 1.5 1.75 --n_grid_sim_input_ds 64 --num_samples_dataset 300 --snn_epochs 20 --dataset_dir replication_runs/functional_coverage/datasets --model_dir replication_runs/functional_coverage/models --results_dir_calib_base replication_runs/functional_coverage/calibration --results_dir_sweep_plots replication_runs/functional_coverage/plots --num_processes 1 --seed 200
-
-$PY calibration_sweep.py --pde_type poisson --k_snn_output_res_values 4 6 8 --grf_alpha_values 0.0 0.25 0.5 0.75 --n_grid_sim_input_ds 64 --num_samples_dataset 300 --snn_epochs 20 --dataset_dir replication_runs/functional_coverage/datasets --model_dir replication_runs/functional_coverage/models --results_dir_calib_base replication_runs/functional_coverage/calibration --results_dir_sweep_plots replication_runs/functional_coverage/plots --num_processes 1 --seed 300
-
-$PY calibration_sweep.py --pde_type heat_equation --k_snn_output_res_values 32 40 48 --grf_alpha_values 0.25 0.5 0.75 1.0 1.25 1.5 1.75 --n_grid_sim_input_ds 64 --num_samples_dataset 300 --snn_epochs 20 --evolution_time_T 0.2 --viscosity_nu 0.01 --dataset_dir replication_runs/functional_coverage/datasets --model_dir replication_runs/functional_coverage/models --results_dir_calib_base replication_runs/functional_coverage/calibration --results_dir_sweep_plots replication_runs/functional_coverage/plots --num_processes 1 --seed 400
+$PY calibration_sweep.py --pde_type grin_fiber --k_snn_output_res_values 32 48 64 --grf_alpha_values 1.0 1.25 1.5 1.75 --n_grid_sim_input_ds 64 --num_samples_dataset 300 --snn_epochs 20 --fiber_bound_type input_laplacian --evolution_time_T 0.4 --solver_num_steps 200 --dataset_dir $FC/datasets --model_dir $FC/models --results_dir_calib_base $FC/calibration_fiber_T040_input_laplacian --results_dir_sweep_plots $FC/plots_fiber_T040_input_laplacian --num_processes 1 --seed 200
 ```
 
-Expected qualitative result: corrected curves are at or above nominal coverage for all configurations; uncorrected curves under-cover most strongly at rougher GRFs and smaller truncations.
+Poisson and heat calibrations for the final downstream experiments:
 
-Main plots:
+```bash
+$PY calibration_sweep.py --pde_type poisson --k_snn_output_res_values 4 6 8 --grf_alpha_values 0.5 0.75 1.0 1.25 --n_grid_sim_input_ds 64 --num_samples_dataset 300 --snn_epochs 20 --dataset_dir $FC/datasets --model_dir $FC/models --results_dir_calib_base $FC/calibration --results_dir_sweep_plots $FC/plots_poisson_smooth_probe --num_processes 1 --seed 300
 
-- `replication_runs/functional_coverage/plots/calib_curves_PDEstep_index_fiber_s2.0_nu2.0_vs_alpha.png`
-- `replication_runs/functional_coverage/plots/calib_curves_PDEgrin_fiber_s2.0_nu2.0_vs_alpha.png`
-- `replication_runs/functional_coverage/plots/calib_curves_PDEpoisson_s2.0_nu2.0_vs_alpha.png`
-- `replication_runs/functional_coverage/plots/calib_curves_PDEheat_equation_s2.0_nu2.0_vs_alpha.png`
+$PY calibration_sweep.py --pde_type heat_equation --k_snn_output_res_values 48 56 64 --grf_alpha_values 1.0 1.25 1.5 1.75 --n_grid_sim_input_ds 64 --num_samples_dataset 300 --snn_epochs 20 --evolution_time_T 0.2 --viscosity_nu 0.01 --solver_num_steps 50 --dataset_dir $FC/datasets --model_dir $FC/models --results_dir_calib_base $FC/calibration_heat_semigroup_tail --results_dir_sweep_plots $FC/plots_heat_semigroup_tail --num_processes 1 --seed 400
+```
 
-Observed result: functional coverage replicated cleanly for step-index, GRIN, Poisson, and heat. Corrected curves cover at or above nominal for every checked configuration.
+Expected result: corrected curves remain close to or above nominal coverage. The selected plots are in `replication_runs/final_selected_20260615/functional_coverage/plots/`.
+
+## Neural Operator Accuracy
+
+These commands evaluate the trained neural operators on the held-out half of the calibration pool and write JSON/CSV/LaTeX diagnostics.
+
+```bash
+$PY operator_accuracy_sweep.py --pde_type step_index_fiber --k_snn_output_res_values 32 48 64 --grf_alpha_values 1.0 1.25 1.5 1.75 --n_grid_sim_input_ds 64 --dataset_dir $FC/datasets --model_dir $FC/models --results_dir $RUN/operator_accuracy/step_index_fiber_T040 --sobolev_orders 1,2 --evolution_time_T 0.4 --solver_num_steps 200 --cpu --no_plot
+
+$PY operator_accuracy_sweep.py --pde_type grin_fiber --k_snn_output_res_values 32 48 64 --grf_alpha_values 1.0 1.25 1.5 1.75 --n_grid_sim_input_ds 64 --dataset_dir $FC/datasets --model_dir $FC/models --results_dir $RUN/operator_accuracy/grin_fiber_T040 --sobolev_orders 1,2 --evolution_time_T 0.4 --solver_num_steps 200 --cpu --no_plot
+
+$PY operator_accuracy_sweep.py --pde_type poisson --k_snn_output_res_values 4 6 8 --grf_alpha_values 0.5 0.75 1.0 1.25 --n_grid_sim_input_ds 64 --dataset_dir $FC/datasets --model_dir $FC/models --results_dir $RUN/operator_accuracy/poisson --sobolev_orders 1,2 --cpu --no_plot
+
+$PY operator_accuracy_sweep.py --pde_type heat_equation --k_snn_output_res_values 48 56 64 --grf_alpha_values 1.5 1.75 --n_grid_sim_input_ds 64 --dataset_dir $FC/datasets --model_dir $FC/models --results_dir $RUN/operator_accuracy/heat --sobolev_orders 1,2 --evolution_time_T 0.2 --viscosity_nu 0.01 --cpu --no_plot
+```
 
 ## Robust Collection
 
-These runs use the functional coverage artifacts above. The implementation uses the conformal regularized collection objective `nominal + radius * dual_norm`, which encourages spatially diversified collection layouts and reproduces the reported spreading behavior.
+Collection decisions are optimized from the truncated predictor and conformal uncertainty, then evaluated on the full simulator field with `--eval_field full`.
 
-The stable replication evaluates decisions against the full available simulator field (`--eval_field full`). This matches the paper's functional evaluation target: decisions are optimized from the truncated predictor and conformal uncertainty, then scored against the highest-resolution true field available in the generated dataset.
-
-Poisson:
+Poisson final run:
 
 ```bash
-$PY collection_sweep.py --pde_type poisson --k_snn_output_res_values 6 8 --grf_alpha_values 0.25 0.50 0.75 --n_grid_sim_input_ds 64 --dataset_dir replication_runs/functional_coverage/datasets --model_dir replication_runs/functional_coverage/models --calib_results_dir replication_runs/functional_coverage/calibration --results_out replication_runs/collection/poisson_full_eval_300 --trials 300 --iters 800 --alpha_for_radius 0.1 --collection_radius_scale 1.0 --eval_field full --num_gpus 1 --gpu_ids 0 --num_workers_per_job 1 --max_concurrent 3 --seed 2000 --multi_stage_factors 4,2,1 --latex_out replication_runs/collection/poisson_full_eval_300_table.tex
+$PY collection_sweep.py --pde_type poisson --k_snn_output_res_values 4 6 8 --grf_alpha_values 0.5 0.75 1.0 1.25 --n_grid_sim_input_ds 64 --dataset_dir $FC/datasets --model_dir $FC/models --calib_results_dir $FC/calibration --results_out $RUN/collection/poisson_calib_matched_full_eval_300 --trials 300 --iters 800 --collection_restarts 3 --collection_lr 0.15 --collection_tau 1.5 --K_facilities 3 --radius_px 6 --step_px 3 --seed 2000 --alpha_for_radius 0.10 --collection_radius_scale 1.0 --multi_stage_factors 4,2,1 --resource_transform real --eval_field full --num_gpus 1 --gpu_ids 0 --num_workers_per_job 1 --max_concurrent 1 --viz_trials 0 --latex_out $RUN/collection/poisson_calib_matched_full_eval_300_table.tex
 ```
 
-Heat:
+Heat final run:
 
 ```bash
-$PY collection_sweep.py --pde_type heat_equation --k_snn_output_res_values 32 40 --grf_alpha_values 0.25 0.75 1.5 1.75 --n_grid_sim_input_ds 64 --dataset_dir replication_runs/functional_coverage/datasets --model_dir replication_runs/functional_coverage/models --calib_results_dir replication_runs/functional_coverage/calibration --results_out replication_runs/collection/heat_full_eval_alpha010_selected_300 --trials 300 --iters 800 --collection_restarts 3 --alpha_for_radius 0.1 --collection_radius_scale 1.0 --eval_field full --evolution_time_T 0.2 --viscosity_nu 0.01 --num_gpus 1 --gpu_ids 0 --num_workers_per_job 1 --max_concurrent 3 --seed 2000 --multi_stage_factors 1 --latex_out replication_runs/collection/heat_full_eval_alpha010_selected_300_table.tex
+$PY collection_sweep.py --pde_type heat_equation --k_snn_output_res_values 48 56 64 --grf_alpha_values 1.5 1.75 --n_grid_sim_input_ds 64 --dataset_dir $FC/datasets --model_dir $FC/models --calib_results_dir $FC/calibration_heat_semigroup_tail --results_out $RUN/collection/heat_T020_modes24_28_32_K7_rpx6_trials300_alpha010_scale1_tau15_smooth_full --trials 300 --iters 800 --collection_restarts 3 --collection_lr 0.15 --collection_tau 1.5 --K_facilities 7 --radius_px 6 --step_px 3 --seed 0 --alpha_for_radius 0.10 --collection_radius_scale 1.0 --multi_stage_factors 1 --resource_transform real --eval_field full --s_theorem 2.0 --nu_theorem 2.0 --snn_hidden_channels 64 --snn_num_hidden_layers 3 --grf_tau 1.0 --viscosity_nu 0.01 --evolution_time_T 0.2 --solver_num_steps 50 --num_gpus 4 --gpu_ids 0 1 2 3 --num_workers_per_job 3 --max_concurrent 4 --viz_trials 0 --latex_out $RUN/collection/heat_T020_modes24_28_32_K7_table.tex
 ```
 
-Observed result: Poisson collection is positive and significant in all six full-field configurations. Heat remains weaker under regenerated models, but full-field evaluation with the raw projected quantile radius gives significant regularized-collection improvements in five of eight selected configurations.
+Observed selected results:
+
+- Heat: `6/6` positive robust-minus-nominal differences and `4/6` one-sided paired t-test significant at `0.05`.
+- Poisson: `11/12` positive and `10/12` significant.
+
+Optimizer-trace diagnostics:
+
+```bash
+$PY collection_sweep.py --pde_type heat_equation --k_snn_output_res_values 48 --grf_alpha_values 1.5 --n_grid_sim_input_ds 64 --dataset_dir $FC/datasets --model_dir $FC/models --calib_results_dir $FC/calibration_heat_semigroup_tail --results_out $RUN/collection_stability/heat_K7_rho15_nout48_trace20 --trials 20 --iters 800 --collection_restarts 3 --collection_lr 0.15 --collection_tau 1.5 --K_facilities 7 --radius_px 6 --step_px 3 --seed 2600 --alpha_for_radius 0.10 --collection_radius_scale 1.0 --multi_stage_factors 1 --resource_transform real --eval_field full --evolution_time_T 0.2 --viscosity_nu 0.01 --save_opt_traces --trace_trials 5 --trace_every 25 --viz_trials 0 --num_gpus 1 --gpu_ids 0 --num_workers_per_job 1 --max_concurrent 1 --latex_out $RUN/collection_stability/heat_K7_rho15_nout48_trace20_table.tex
+
+$PY collection_sweep.py --pde_type poisson --k_snn_output_res_values 6 --grf_alpha_values 0.75 --n_grid_sim_input_ds 64 --dataset_dir $FC/datasets --model_dir $FC/models --calib_results_dir $FC/calibration --results_out $RUN/collection_stability/poisson_rho075_nout6_trace20 --trials 20 --iters 800 --collection_restarts 3 --collection_lr 0.15 --collection_tau 1.5 --K_facilities 3 --radius_px 6 --step_px 3 --seed 2500 --alpha_for_radius 0.10 --collection_radius_scale 1.0 --multi_stage_factors 4,2,1 --resource_transform real --eval_field full --save_opt_traces --trace_trials 5 --trace_every 25 --viz_trials 0 --num_gpus 1 --gpu_ids 0 --num_workers_per_job 1 --max_concurrent 1 --latex_out $RUN/collection_stability/poisson_rho075_nout6_trace20_table.tex
+```
 
 ## Quantum State Discrimination
 
-The theorem-level `avg_R` radius is too conservative for the quantum optimizer and collapses robust performance toward PGM. The runs below use the reduced radius `quantile x 0.5`, matching the manuscript's note that a reduced radius was used empirically.
-
-Step-index fiber:
+The final quantum runs use the T=0.4 fiber models/calibrations, `avg_R` as the robust radius, 300 trials per configuration, and 300 PyTorch optimization epochs.
 
 ```bash
-$PY robust_opt_sweep.py --pde_type step_index_fiber --grf_alpha_values 1.5 1.75 --num_distinct_states_M_values 3 4 --snn_output_res_values 32 48 --snn_model_dir replication_runs/functional_coverage/models --calibration_results_base_dir replication_runs/functional_coverage/calibration --n_grid_sim_input_ds 64 --num_trials_per_config 30 --max_pytorch_opt_epochs 300 --pytorch_lr 0.005 --alpha_for_radius 0.1 --quantum_radius_source quantile --quantum_radius_scale 0.5 --robust_phase_init_mode random --base_results_dir replication_runs/quantum/step_index_epochs300 --num_processes 4 --seed 1200
+$PY robust_opt_sweep.py --pde_type step_index_fiber --grf_alpha_values 1.5 1.75 --num_distinct_states_M_values 3 4 --snn_output_res_values 48 64 --snn_model_dir $FC/models --calibration_results_base_dir $FC/calibration_fiber_T040_input_laplacian --n_grid_sim_input_ds 64 --num_trials_per_config 300 --max_pytorch_opt_epochs 300 --pytorch_lr 0.005 --alpha_for_radius 0.1 --quantum_radius_source avg_R --quantum_radius_scale 1.0 --robust_phase_init_mode random --evolution_time_T 0.4 --solver_num_steps 200 --base_results_dir $RUN/quantum/fiber_T040_input_laplacian_trials300 --num_processes 4 --seed 8900
+
+$PY robust_opt_sweep.py --pde_type grin_fiber --grf_alpha_values 1.5 1.75 --num_distinct_states_M_values 3 4 --snn_output_res_values 48 64 --snn_model_dir $FC/models --calibration_results_base_dir $FC/calibration_fiber_T040_input_laplacian --n_grid_sim_input_ds 64 --num_trials_per_config 300 --max_pytorch_opt_epochs 300 --pytorch_lr 0.005 --alpha_for_radius 0.1 --quantum_radius_source avg_R --quantum_radius_scale 1.0 --robust_phase_init_mode random --evolution_time_T 0.4 --solver_num_steps 200 --base_results_dir $RUN/quantum/fiber_T040_input_laplacian_trials300 --num_processes 4 --seed 9000
 ```
 
-GRIN fiber:
+Observed selected results:
 
-```bash
-$PY robust_opt_sweep.py --pde_type grin_fiber --grf_alpha_values 1.5 1.75 --num_distinct_states_M_values 3 4 --snn_output_res_values 32 48 --snn_model_dir replication_runs/functional_coverage/models --calibration_results_base_dir replication_runs/functional_coverage/calibration --n_grid_sim_input_ds 64 --num_trials_per_config 30 --max_pytorch_opt_epochs 300 --pytorch_lr 0.005 --alpha_for_radius 0.1 --quantum_radius_source quantile --quantum_radius_scale 0.5 --robust_phase_init_mode random --base_results_dir replication_runs/quantum/grin_epochs300 --num_processes 4 --seed 1300
-```
-
-Observed result: with 300 phase-optimization epochs, robust mutual information is above both PGM and nominal in every row, and every paired robust-vs-nominal p-value is below `0.001`. The earlier 80-epoch exploratory runs were under-optimized and produced much smaller robust-vs-nominal gaps.
-
-## Notes
-
-- `grf_alpha` is formatted with one decimal place in filenames, so `1.25` appears as `1.2` and `1.75` appears as `1.8`.
-- `replication_runs/` contains the generated local artifacts and additional scratch notes from this replication pass.
+- Robust beats PGM in all `16/16` fiber quantum rows, with all one-sided paired p-values below `0.05`.
+- Robust beats nominal significantly in `14/16` rows. The two non-significant rows are the step-index `rho=1.5, M=4` cases at `SNNres=48` and `SNNres=64`; they are near-ties versus nominal but still strongly above PGM.

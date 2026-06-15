@@ -139,6 +139,7 @@ def run_single_calibration_pipeline(params_tuple):
         "--nu_theorem", str(args.theorem_nu),
         "--d_dimensions", str(args.theorem_d), 
         "--elliptic_PDE_const_C_sq", str(args.elliptic_PDE_const_C_sq),
+        "--fiber_bound_type", str(args.fiber_bound_type),
         "--fiber_potential_depth", str(args.fiber_potential_depth), 
         "--L_domain", str(args.L_domain), 
         "--evolution_time_T", str(args.evolution_time_T),
@@ -190,6 +191,9 @@ if __name__ == '__main__':
     parser.add_argument('--theorem_nu', type=float, default=2.0) 
     parser.add_argument('--theorem_d', type=int, default=2)
     parser.add_argument('--elliptic_PDE_const_C_sq', type=float, default=4.0)
+    parser.add_argument('--fiber_bound_type', type=str, default="graph_equiv",
+                        choices=["graph_equiv", "input_laplacian"],
+                        help="Tail bound used by calibration.py for fiber examples.")
 
     parser.add_argument('--grf_tau', type=float, default=1.0)   
     parser.add_argument('--grf_offset_sigma', type=float, default=0.5)
@@ -253,7 +257,7 @@ if __name__ == '__main__':
                 "--grf_offset_sigma", str(current_iter_args.grf_offset_sigma)
             ])
         elif current_iter_args.pde_type == "step_index_fiber":
-            current_filename_suffix = (f"fiber_GRFinA{current_iter_args.grf_alpha:.1f}T{current_iter_args.grf_tau:.1f}_"
+            current_filename_suffix = (f"fiber_GRFinA{current_iter_args.grf_alpha:.2f}T{current_iter_args.grf_tau:.2f}_"
                                        f"coreR{current_iter_args.fiber_core_radius_factor:.1f}_V{current_iter_args.fiber_potential_depth:.1f}_"
                                        f"evoT{current_iter_args.evolution_time_T:.1e}_steps{current_iter_args.solver_num_steps}")
             current_base_sub_script_args.extend([
@@ -266,7 +270,7 @@ if __name__ == '__main__':
                 "--grf_tau", str(current_iter_args.grf_tau)
             ])
         elif current_iter_args.pde_type == "grin_fiber":
-            current_filename_suffix = (f"grinfiber_GRFinA{current_iter_args.grf_alpha:.1f}T{current_iter_args.grf_tau:.1f}_"
+            current_filename_suffix = (f"grinfiber_GRFinA{current_iter_args.grf_alpha:.2f}T{current_iter_args.grf_tau:.2f}_"
                                        f"strength{current_iter_args.grin_strength:.2e}_"
                                        f"evoT{current_iter_args.evolution_time_T:.1e}_steps{current_iter_args.solver_num_steps}")
             current_base_sub_script_args.extend([
@@ -278,7 +282,7 @@ if __name__ == '__main__':
                 "--grf_tau", str(current_iter_args.grf_tau)
             ])
         elif current_iter_args.pde_type == "heat_equation":
-            current_filename_suffix = (f"heat_GRFinA{current_iter_args.grf_alpha:.1f}T{current_iter_args.grf_tau:.1f}_"
+            current_filename_suffix = (f"heat_GRFinA{current_iter_args.grf_alpha:.2f}T{current_iter_args.grf_tau:.2f}_"
                                        f"nu{current_iter_args.viscosity_nu:.2e}_evoT{current_iter_args.evolution_time_T:.1e}")
             current_base_sub_script_args.extend([
                 "--L_domain", str(current_iter_args.L_domain),
@@ -349,15 +353,15 @@ if __name__ == '__main__':
                 if args.pde_type == "poisson":
                     plot_iter_filename_suffix = f"poisson_grfA{current_grf_alpha_plot_val:.1f}T{args.grf_tau:.1f}OffS{args.grf_offset_sigma:.1f}"
                 elif args.pde_type == "step_index_fiber":
-                     plot_iter_filename_suffix = (f"fiber_GRFinA{current_grf_alpha_plot_val:.1f}T{args.grf_tau:.1f}_"
+                     plot_iter_filename_suffix = (f"fiber_GRFinA{current_grf_alpha_plot_val:.2f}T{args.grf_tau:.2f}_"
                                                f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
                                                f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
                 elif args.pde_type == "grin_fiber":
-                     plot_iter_filename_suffix = (f"grinfiber_GRFinA{current_grf_alpha_plot_val:.1f}T{args.grf_tau:.1f}_"
+                     plot_iter_filename_suffix = (f"grinfiber_GRFinA{current_grf_alpha_plot_val:.2f}T{args.grf_tau:.2f}_"
                                                f"strength{args.grin_strength:.2e}_"
                                                f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
                 elif args.pde_type == "heat_equation":
-                    plot_iter_filename_suffix = (f"heat_GRFinA{current_grf_alpha_plot_val:.1f}T{args.grf_tau:.1f}_"
+                    plot_iter_filename_suffix = (f"heat_GRFinA{current_grf_alpha_plot_val:.2f}T{args.grf_tau:.2f}_"
                                        f"nu{args.viscosity_nu:.2e}_evoT{args.evolution_time_T:.1e}")
 
                 has_data_for_this_subplot = False

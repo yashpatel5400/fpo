@@ -1,0 +1,1183 @@
+{
+  "pde_type": "grin_fiber",
+  "rows": [
+    {
+      "pde_type": "grin_fiber",
+      "grf_alpha": 1.0,
+      "snn_output_res": 32,
+      "num_test_samples": 150,
+      "rel_l2_truncated_spectral_mean": 0.8774877344405354,
+      "rel_l2_full_spectral_mean": 0.9034422811743472,
+      "rel_l2_full_spatial_mean": 0.9034422965844472,
+      "rel_H1_full_mean": 0.9995952266935573,
+      "rel_H2_full_mean": 1.0001627759371383
+    },
+    {
+      "pde_type": "grin_fiber",
+      "grf_alpha": 1.0,
+      "snn_output_res": 48,
+      "num_test_samples": 150,
+      "rel_l2_truncated_spectral_mean": 0.8905305736881606,
+      "rel_l2_full_spectral_mean": 0.9000315769063868,
+      "rel_l2_full_spatial_mean": 0.9000316023826599,
+      "rel_H1_full_mean": 0.9999434551347353,
+      "rel_H2_full_mean": 1.0010056241748264
+    },
+    {
+      "pde_type": "grin_fiber",
+      "grf_alpha": 1.0,
+      "snn_output_res": 64,
+      "num_test_samples": 150,
+      "rel_l2_truncated_spectral_mean": 0.9735042189180537,
+      "rel_l2_full_spectral_mean": 0.9735042189180537,
+      "rel_l2_full_spatial_mean": 0.9735042357444763,
+      "rel_H1_full_mean": 1.01232719727097,
+      "rel_H2_full_mean": 1.0184331144477383
+    },
+    {
+      "pde_type": "grin_fiber",
+      "grf_alpha": 1.25,
+      "snn_output_res": 32,
+      "num_test_samples": 150,
+      "rel_l2_truncated_spectral_mean": 0.8210828324400169,
+      "rel_l2_full_spectral_mean": 0.8389397233066468,
+      "rel_l2_full_spatial_mean": 0.8389397239685059,
+      "rel_H1_full_mean": 1.0029898800483144,
+      "rel_H2_full_mean": 1.0023913766881234
+    },
+    {
+      "pde_type": "grin_fiber",
+      "grf_alpha": 1.25,
+      "snn_output_res": 48,
+      "num_test_samples": 150,
+      "rel_l2_truncated_spectral_mean": 0.8132547356635575,
+      "rel_l2_full_spectral_mean": 0.8203103344588305,
+      "rel_l2_full_spatial_mean": 0.8203103331724803,
+      "rel_H1_full_mean": 0.9978512982420475,
+      "rel_H2_full_mean": 1.001936958372751
+    },
+    {
+      "pde_type": "grin_fiber",
+      "grf_alpha": 1.25,
+      "snn_output_res": 64,
+      "num_test_samples": 150,
+      "rel_l2_truncated_spectral_mean": 0.8021929586108365,
+      "rel_l2_full_spectral_mean": 0.8021929586108365,
+      "rel_l2_full_spatial_mean": 0.8021929605801901,
+      "rel_H1_full_mean": 1.00498245589655,
+      "rel_H2_full_mean": 1.0212216344102951
+    },
+    {
+      "pde_type": "grin_fiber",
+      "grf_alpha": 1.5,
+      "snn_output_res": 32,
+      "num_test_samples": 150,
+      "rel_l2_truncated_spectral_mean": 0.6321774625382326,
+      "rel_l2_full_spectral_mean": 0.6484224166703644,
+      "rel_l2_full_spatial_mean": 0.6484224383036296,
+      "rel_H1_full_mean": 0.9780527281135193,
+      "rel_H2_full_mean": 1.0012590542223627
+    },
+    {
+      "pde_type": "grin_fiber",
+      "grf_alpha": 1.5,
+      "snn_output_res": 48,
+      "num_test_samples": 150,
+      "rel_l2_truncated_spectral_mean": 0.7015624162851558,
+      "rel_l2_full_spectral_mean": 0.7057438270183184,
+      "rel_l2_full_spatial_mean": 0.7057438345750173,
+      "rel_H1_full_mean": 0.9889915594688963,
+      "rel_H2_full_mean": 1.00518068259348
+    },
+    {
+      "pde_type": "grin_fiber",
+      "grf_alpha": 1.5,
+      "snn_output_res": 64,
+      "num_test_samples": 150,
+      "rel_l2_truncated_spectral_mean": 0.6787555544355388,
+      "rel_l2_full_spectral_mean": 0.6787555544355388,
+      "rel_l2_full_spatial_mean": 0.6787555704514185,
+      "rel_H1_full_mean": 0.9847779927188909,
+      "rel_H2_full_mean": 1.0171159104234895
+    },
+    {
+      "pde_type": "grin_fiber",
+      "grf_alpha": 1.75,
+      "snn_output_res": 32,
+      "num_test_samples": 150,
+      "rel_l2_truncated_spectral_mean": 0.5270308476604171,
+      "rel_l2_full_spectral_mean": 0.5350346926977005,
+      "rel_l2_full_spatial_mean": 0.5350346970558166,
+      "rel_H1_full_mean": 0.9390071304762541,
+      "rel_H2_full_mean": 1.0010615437164707
+    },
+    {
+      "pde_type": "grin_fiber",
+      "grf_alpha": 1.75,
+      "snn_output_res": 48,
+      "num_test_samples": 150,
+      "rel_l2_truncated_spectral_mean": 0.5095149510239219,
+      "rel_l2_full_spectral_mean": 0.5120841103187204,
+      "rel_l2_full_spatial_mean": 0.5120841199159623,
+      "rel_H1_full_mean": 0.9353400170742784,
+      "rel_H2_full_mean": 1.0095762987752335
+    },
+    {
+      "pde_type": "grin_fiber",
+      "grf_alpha": 1.75,
+      "snn_output_res": 64,
+      "num_test_samples": 150,
+      "rel_l2_truncated_spectral_mean": 0.606366791212109,
+      "rel_l2_full_spectral_mean": 0.606366791212109,
+      "rel_l2_full_spatial_mean": 0.6063667976856232,
+      "rel_H1_full_mean": 1.0112513313012617,
+      "rel_H2_full_mean": 1.262087303291265
+    }
+  ],
+  "payloads": [
+    {
+      "pde_type": "grin_fiber",
+      "suffix": "grinfiber_GRFinA1.00T1.00_strength1.00e-01_evoT4.0e-01_steps200",
+      "dataset_path": "replication_runs/original_setup_20260614_073412/functional_coverage/datasets/dataset_grin_fiber_Nin64_Nout32_grinfiber_GRFinA1.00T1.00_strength1.00e-01_evoT4.0e-01_steps200.npz",
+      "model_path": "replication_runs/original_setup_20260614_073412/functional_coverage/models/snn_PDEgrin_fiber_Kin64_Kout32_H64_L3_grinfiber_GRFinA1.00T1.00_strength1.00e-01_evoT4.0e-01_steps200.pth",
+      "n_grid_sim_input_ds": 64,
+      "snn_output_res": 32,
+      "num_test_samples": 150,
+      "calib_split_ratio": 0.5,
+      "random_seed": 42,
+      "sobolev_orders": [
+        1.0,
+        2.0
+      ],
+      "summary": {
+        "rel_l2_truncated_spectral": {
+          "mean": 0.8774877344405354,
+          "median": 0.881158568298475,
+          "std": 0.0457696295996613,
+          "se": 0.00373707460784519,
+          "p90": 0.9356743422255671,
+          "p95": 0.9485829300135732,
+          "min": 0.7692137441139258,
+          "max": 0.9823454076136645
+        },
+        "rel_l2_full_spectral": {
+          "mean": 0.9034422811743472,
+          "median": 0.9067437939813201,
+          "std": 0.037591243671014116,
+          "se": 0.0030693121930204046,
+          "p90": 0.950234646411218,
+          "p95": 0.9608151008378415,
+          "min": 0.8146024913910601,
+          "max": 0.9867986610600109
+        },
+        "rel_l2_full_spatial": {
+          "mean": 0.9034422965844472,
+          "median": 0.9067437648773193,
+          "std": 0.03759124146745979,
+          "se": 0.0030693120131009472,
+          "p90": 0.9502345561981201,
+          "p95": 0.9608152866363525,
+          "min": 0.8146024346351624,
+          "max": 0.9867987036705017
+        },
+        "rel_H1_truncated": {
+          "mean": 0.9983816657924912,
+          "median": 0.998189099028971,
+          "std": 0.004116971208210566,
+          "se": 0.00033614929152818164,
+          "p90": 1.0033935127546192,
+          "p95": 1.0052852947932271,
+          "min": 0.9870658337218395,
+          "max": 1.0110382428396207
+        },
+        "rel_H1_full": {
+          "mean": 0.9995952266935573,
+          "median": 0.9995498351009653,
+          "std": 0.0010330895068972053,
+          "se": 8.435140501738785e-05,
+          "p90": 1.0008612532426278,
+          "p95": 1.0013096428051016,
+          "min": 0.9967427433976641,
+          "max": 1.002737692820954
+        },
+        "rel_H2_truncated": {
+          "mean": 1.002569731220617,
+          "median": 1.002762168823919,
+          "std": 0.003671133051243393,
+          "se": 0.0002997467584471001,
+          "p90": 1.0069392959475756,
+          "p95": 1.0084420377421601,
+          "min": 0.991352327558024,
+          "max": 1.010693617282306
+        },
+        "rel_H2_full": {
+          "mean": 1.0001627759371383,
+          "median": 1.0001824564831567,
+          "std": 0.000232064522750866,
+          "se": 1.894798893807066e-05,
+          "p90": 1.0004381554859254,
+          "p95": 1.000523318900418,
+          "min": 0.9994530966715303,
+          "max": 1.0006826210644721
+        }
+      }
+    },
+    {
+      "pde_type": "grin_fiber",
+      "suffix": "grinfiber_GRFinA1.00T1.00_strength1.00e-01_evoT4.0e-01_steps200",
+      "dataset_path": "replication_runs/original_setup_20260614_073412/functional_coverage/datasets/dataset_grin_fiber_Nin64_Nout48_grinfiber_GRFinA1.00T1.00_strength1.00e-01_evoT4.0e-01_steps200.npz",
+      "model_path": "replication_runs/original_setup_20260614_073412/functional_coverage/models/snn_PDEgrin_fiber_Kin64_Kout48_H64_L3_grinfiber_GRFinA1.00T1.00_strength1.00e-01_evoT4.0e-01_steps200.pth",
+      "n_grid_sim_input_ds": 64,
+      "snn_output_res": 48,
+      "num_test_samples": 150,
+      "calib_split_ratio": 0.5,
+      "random_seed": 42,
+      "sobolev_orders": [
+        1.0,
+        2.0
+      ],
+      "summary": {
+        "rel_l2_truncated_spectral": {
+          "mean": 0.8905305736881606,
+          "median": 0.8914272342467566,
+          "std": 0.0375609921714616,
+          "se": 0.003066842168425148,
+          "p90": 0.9368035634044285,
+          "p95": 0.9551618238672648,
+          "min": 0.7930315271679965,
+          "max": 0.9854255529833996
+        },
+        "rel_l2_full_spectral": {
+          "mean": 0.9000315769063868,
+          "median": 0.9009918423807258,
+          "std": 0.03470724586322554,
+          "se": 0.0028338347580741615,
+          "p90": 0.9422712771026103,
+          "p95": 0.9593392097859358,
+          "min": 0.8069483966226751,
+          "max": 0.9867054977423954
+        },
+        "rel_l2_full_spatial": {
+          "mean": 0.9000316023826599,
+          "median": 0.9009919166564941,
+          "std": 0.03470722607783157,
+          "se": 0.002833833142603509,
+          "p90": 0.9422713279724121,
+          "p95": 0.9593391448259354,
+          "min": 0.8069484233856201,
+          "max": 0.9867056012153625
+        },
+        "rel_H1_truncated": {
+          "mean": 0.9998975541787568,
+          "median": 0.9995941855859942,
+          "std": 0.001756223200955014,
+          "se": 0.00014339502389257156,
+          "p90": 1.0021579981388564,
+          "p95": 1.002932421887434,
+          "min": 0.9944554103235341,
+          "max": 1.0058664235888062
+        },
+        "rel_H1_full": {
+          "mean": 0.9999434551347353,
+          "median": 0.9997688213778158,
+          "std": 0.0009925748636119736,
+          "se": 8.104339824539805e-05,
+          "p90": 1.0012282728374466,
+          "p95": 1.001666621952097,
+          "min": 0.9968698439568376,
+          "max": 1.003275254161983
+        },
+        "rel_H2_truncated": {
+          "mean": 1.0031555065535664,
+          "median": 1.003096417723493,
+          "std": 0.0014327327349350591,
+          "se": 0.00011698213794577058,
+          "p90": 1.0050390012063164,
+          "p95": 1.0055175307077067,
+          "min": 1.0006177125807232,
+          "max": 1.0073848687583595
+        },
+        "rel_H2_full": {
+          "mean": 1.0010056241748264,
+          "median": 1.000973726354025,
+          "std": 0.0004584220216069326,
+          "se": 3.743000132640366e-05,
+          "p90": 1.00162728081674,
+          "p95": 1.0017937883978303,
+          "min": 1.000191228734311,
+          "max": 1.0023494930462233
+        }
+      }
+    },
+    {
+      "pde_type": "grin_fiber",
+      "suffix": "grinfiber_GRFinA1.00T1.00_strength1.00e-01_evoT4.0e-01_steps200",
+      "dataset_path": "replication_runs/original_setup_20260614_073412/functional_coverage/datasets/dataset_grin_fiber_Nin64_Nout64_grinfiber_GRFinA1.00T1.00_strength1.00e-01_evoT4.0e-01_steps200.npz",
+      "model_path": "replication_runs/original_setup_20260614_073412/functional_coverage/models/snn_PDEgrin_fiber_Kin64_Kout64_H64_L3_grinfiber_GRFinA1.00T1.00_strength1.00e-01_evoT4.0e-01_steps200.pth",
+      "n_grid_sim_input_ds": 64,
+      "snn_output_res": 64,
+      "num_test_samples": 150,
+      "calib_split_ratio": 0.5,
+      "random_seed": 42,
+      "sobolev_orders": [
+        1.0,
+        2.0
+      ],
+      "summary": {
+        "rel_l2_truncated_spectral": {
+          "mean": 0.9735042189180537,
+          "median": 0.975345785585096,
+          "std": 0.013276547227906067,
+          "se": 0.0010840255418110784,
+          "p90": 0.988689087171204,
+          "p95": 0.9922193504237702,
+          "min": 0.9267851558919867,
+          "max": 1.0014174634501858
+        },
+        "rel_l2_full_spectral": {
+          "mean": 0.9735042189180537,
+          "median": 0.975345785585096,
+          "std": 0.013276547227906067,
+          "se": 0.0010840255418110784,
+          "p90": 0.988689087171204,
+          "p95": 0.9922193504237702,
+          "min": 0.9267851558919867,
+          "max": 1.0014174634501858
+        },
+        "rel_l2_full_spatial": {
+          "mean": 0.9735042357444763,
+          "median": 0.9753457903862,
+          "std": 0.013276537155406689,
+          "se": 0.001084024719394948,
+          "p90": 0.9886889278888702,
+          "p95": 0.9922195076942444,
+          "min": 0.9267851710319519,
+          "max": 1.001417636871338
+        },
+        "rel_H1_truncated": {
+          "mean": 1.01232719727097,
+          "median": 1.0122355865668968,
+          "std": 0.0018137464927607747,
+          "se": 0.00014809178100088272,
+          "p90": 1.0147793025989158,
+          "p95": 1.0155065843387225,
+          "min": 1.0080779514206055,
+          "max": 1.0174248696275925
+        },
+        "rel_H1_full": {
+          "mean": 1.01232719727097,
+          "median": 1.0122355865668968,
+          "std": 0.0018137464927607747,
+          "se": 0.00014809178100088272,
+          "p90": 1.0147793025989158,
+          "p95": 1.0155065843387225,
+          "min": 1.0080779514206055,
+          "max": 1.0174248696275925
+        },
+        "rel_H2_truncated": {
+          "mean": 1.0184331144477383,
+          "median": 1.0183764066346361,
+          "std": 0.0032801551903162323,
+          "se": 0.0002678235497805538,
+          "p90": 1.0226500454169647,
+          "p95": 1.024164934038012,
+          "min": 1.008351156351676,
+          "max": 1.028603351848172
+        },
+        "rel_H2_full": {
+          "mean": 1.0184331144477383,
+          "median": 1.0183764066346361,
+          "std": 0.0032801551903162323,
+          "se": 0.0002678235497805538,
+          "p90": 1.0226500454169647,
+          "p95": 1.024164934038012,
+          "min": 1.008351156351676,
+          "max": 1.028603351848172
+        }
+      }
+    },
+    {
+      "pde_type": "grin_fiber",
+      "suffix": "grinfiber_GRFinA1.25T1.00_strength1.00e-01_evoT4.0e-01_steps200",
+      "dataset_path": "replication_runs/original_setup_20260614_073412/functional_coverage/datasets/dataset_grin_fiber_Nin64_Nout32_grinfiber_GRFinA1.25T1.00_strength1.00e-01_evoT4.0e-01_steps200.npz",
+      "model_path": "replication_runs/original_setup_20260614_073412/functional_coverage/models/snn_PDEgrin_fiber_Kin64_Kout32_H64_L3_grinfiber_GRFinA1.25T1.00_strength1.00e-01_evoT4.0e-01_steps200.pth",
+      "n_grid_sim_input_ds": 64,
+      "snn_output_res": 32,
+      "num_test_samples": 150,
+      "calib_split_ratio": 0.5,
+      "random_seed": 42,
+      "sobolev_orders": [
+        1.0,
+        2.0
+      ],
+      "summary": {
+        "rel_l2_truncated_spectral": {
+          "mean": 0.8210828324400169,
+          "median": 0.8220682693802915,
+          "std": 0.05352012822309709,
+          "se": 0.004369900170497227,
+          "p90": 0.8867503212582899,
+          "p95": 0.9068368850332769,
+          "min": 0.6913447558824066,
+          "max": 0.9608279472535138
+        },
+        "rel_l2_full_spectral": {
+          "mean": 0.8389397233066468,
+          "median": 0.8411122788367221,
+          "std": 0.049606135245667454,
+          "se": 0.004050323982112584,
+          "p90": 0.900028483228538,
+          "p95": 0.9183232404969244,
+          "min": 0.7156984594212693,
+          "max": 0.9653445060181676
+        },
+        "rel_l2_full_spatial": {
+          "mean": 0.8389397239685059,
+          "median": 0.8411123156547546,
+          "std": 0.04960612390556119,
+          "se": 0.004050323056196785,
+          "p90": 0.9000284850597381,
+          "p95": 0.9183233052492141,
+          "min": 0.7156984806060791,
+          "max": 0.9653445482254028
+        },
+        "rel_H1_truncated": {
+          "mean": 1.0084976406923083,
+          "median": 1.008630008386706,
+          "std": 0.0068673839964466625,
+          "se": 0.0005607195553016483,
+          "p90": 1.0163981644912592,
+          "p95": 1.0191812661675974,
+          "min": 0.9880631594812871,
+          "max": 1.0346227034279605
+        },
+        "rel_H1_full": {
+          "mean": 1.0029898800483144,
+          "median": 1.0030092764489849,
+          "std": 0.0024339744385006214,
+          "se": 0.00019873318071012393,
+          "p90": 1.0056636274905855,
+          "p95": 1.006679898289322,
+          "min": 0.9958425345344945,
+          "max": 1.0125008819485044
+        },
+        "rel_H2_truncated": {
+          "mean": 1.0265502151505703,
+          "median": 1.026612949619085,
+          "std": 0.006178046566600535,
+          "se": 0.0005044353898441614,
+          "p90": 1.0341635239986415,
+          "p95": 1.0372172652456364,
+          "min": 1.0115087925148172,
+          "max": 1.0421532820983437
+        },
+        "rel_H2_full": {
+          "mean": 1.0023913766881234,
+          "median": 1.0023857271574048,
+          "std": 0.0005616981013475561,
+          "se": 4.586245792638749e-05,
+          "p90": 1.0031678339691117,
+          "p95": 1.0033091697356469,
+          "min": 1.0009554219296757,
+          "max": 1.0037754312518217
+        }
+      }
+    },
+    {
+      "pde_type": "grin_fiber",
+      "suffix": "grinfiber_GRFinA1.25T1.00_strength1.00e-01_evoT4.0e-01_steps200",
+      "dataset_path": "replication_runs/original_setup_20260614_073412/functional_coverage/datasets/dataset_grin_fiber_Nin64_Nout48_grinfiber_GRFinA1.25T1.00_strength1.00e-01_evoT4.0e-01_steps200.npz",
+      "model_path": "replication_runs/original_setup_20260614_073412/functional_coverage/models/snn_PDEgrin_fiber_Kin64_Kout48_H64_L3_grinfiber_GRFinA1.25T1.00_strength1.00e-01_evoT4.0e-01_steps200.pth",
+      "n_grid_sim_input_ds": 64,
+      "snn_output_res": 48,
+      "num_test_samples": 150,
+      "calib_split_ratio": 0.5,
+      "random_seed": 42,
+      "sobolev_orders": [
+        1.0,
+        2.0
+      ],
+      "summary": {
+        "rel_l2_truncated_spectral": {
+          "mean": 0.8132547356635575,
+          "median": 0.8128523817158391,
+          "std": 0.05182309342260482,
+          "se": 0.004231337859265496,
+          "p90": 0.8729820901645213,
+          "p95": 0.8941709636436381,
+          "min": 0.6785064861425317,
+          "max": 0.9249249891710932
+        },
+        "rel_l2_full_spectral": {
+          "mean": 0.8203103344588305,
+          "median": 0.8204979372319396,
+          "std": 0.05057601883046454,
+          "se": 0.004129514645201058,
+          "p90": 0.8784100734860028,
+          "p95": 0.8989206767889536,
+          "min": 0.6886110511337852,
+          "max": 0.9285170352411918
+        },
+        "rel_l2_full_spatial": {
+          "mean": 0.8203103331724803,
+          "median": 0.820497989654541,
+          "std": 0.05057603022600116,
+          "se": 0.004129515575642727,
+          "p90": 0.878409993648529,
+          "p95": 0.8989206850528716,
+          "min": 0.6886110901832581,
+          "max": 0.9285169839859009
+        },
+        "rel_H1_truncated": {
+          "mean": 0.996688479978507,
+          "median": 0.9975898562968459,
+          "std": 0.0037832155431903156,
+          "se": 0.00030889825559275225,
+          "p90": 1.0007265265448242,
+          "p95": 1.0016467004864569,
+          "min": 0.9814095302982171,
+          "max": 1.003743101734733
+        },
+        "rel_H1_full": {
+          "mean": 0.9978512982420475,
+          "median": 0.9984379926306017,
+          "std": 0.0024492467330552432,
+          "se": 0.0001999801583388009,
+          "p90": 1.000483148349218,
+          "p95": 1.0010729701841443,
+          "min": 0.988186508397889,
+          "max": 1.0024083865667057
+        },
+        "rel_H2_truncated": {
+          "mean": 1.0052799739032068,
+          "median": 1.0051625713079368,
+          "std": 0.0018014533976173765,
+          "se": 0.00014708805398552232,
+          "p90": 1.0078235690540454,
+          "p95": 1.008346901864641,
+          "min": 1.0002762286653764,
+          "max": 1.010068242294024
+        },
+        "rel_H2_full": {
+          "mean": 1.001936958372751,
+          "median": 1.0018825830242641,
+          "std": 0.000654376942479561,
+          "se": 5.342965361725008e-05,
+          "p90": 1.0027980618276204,
+          "p95": 1.0030356144061192,
+          "min": 1.0000974975299017,
+          "max": 1.003580197453975
+        }
+      }
+    },
+    {
+      "pde_type": "grin_fiber",
+      "suffix": "grinfiber_GRFinA1.25T1.00_strength1.00e-01_evoT4.0e-01_steps200",
+      "dataset_path": "replication_runs/original_setup_20260614_073412/functional_coverage/datasets/dataset_grin_fiber_Nin64_Nout64_grinfiber_GRFinA1.25T1.00_strength1.00e-01_evoT4.0e-01_steps200.npz",
+      "model_path": "replication_runs/original_setup_20260614_073412/functional_coverage/models/snn_PDEgrin_fiber_Kin64_Kout64_H64_L3_grinfiber_GRFinA1.25T1.00_strength1.00e-01_evoT4.0e-01_steps200.pth",
+      "n_grid_sim_input_ds": 64,
+      "snn_output_res": 64,
+      "num_test_samples": 150,
+      "calib_split_ratio": 0.5,
+      "random_seed": 42,
+      "sobolev_orders": [
+        1.0,
+        2.0
+      ],
+      "summary": {
+        "rel_l2_truncated_spectral": {
+          "mean": 0.8021929586108365,
+          "median": 0.8013375279329074,
+          "std": 0.0565463822198335,
+          "se": 0.004616992774632641,
+          "p90": 0.8705766498727089,
+          "p95": 0.8872645194478629,
+          "min": 0.649917961077696,
+          "max": 0.9398663237141893
+        },
+        "rel_l2_full_spectral": {
+          "mean": 0.8021929586108365,
+          "median": 0.8013375279329074,
+          "std": 0.0565463822198335,
+          "se": 0.004616992774632641,
+          "p90": 0.8705766498727089,
+          "p95": 0.8872645194478629,
+          "min": 0.649917961077696,
+          "max": 0.9398663237141893
+        },
+        "rel_l2_full_spatial": {
+          "mean": 0.8021929605801901,
+          "median": 0.8013375401496887,
+          "std": 0.05654638121170928,
+          "se": 0.004616992692319644,
+          "p90": 0.8705767750740051,
+          "p95": 0.8872643947601319,
+          "min": 0.6499180197715759,
+          "max": 0.9398662447929382
+        },
+        "rel_H1_truncated": {
+          "mean": 1.00498245589655,
+          "median": 1.0047774743317184,
+          "std": 0.002034584252164823,
+          "se": 0.00016612310855019724,
+          "p90": 1.0077558058036682,
+          "p95": 1.0088608847586047,
+          "min": 0.9999365504024447,
+          "max": 1.0105970112739633
+        },
+        "rel_H1_full": {
+          "mean": 1.00498245589655,
+          "median": 1.0047774743317184,
+          "std": 0.002034584252164823,
+          "se": 0.00016612310855019724,
+          "p90": 1.0077558058036682,
+          "p95": 1.0088608847586047,
+          "min": 0.9999365504024447,
+          "max": 1.0105970112739633
+        },
+        "rel_H2_truncated": {
+          "mean": 1.0212216344102951,
+          "median": 1.0211422266297492,
+          "std": 0.004208957783205607,
+          "se": 0.00034365996392565193,
+          "p90": 1.0266170741920018,
+          "p95": 1.0280216468433536,
+          "min": 1.0112675903559456,
+          "max": 1.0344751060060322
+        },
+        "rel_H2_full": {
+          "mean": 1.0212216344102951,
+          "median": 1.0211422266297492,
+          "std": 0.004208957783205607,
+          "se": 0.00034365996392565193,
+          "p90": 1.0266170741920018,
+          "p95": 1.0280216468433536,
+          "min": 1.0112675903559456,
+          "max": 1.0344751060060322
+        }
+      }
+    },
+    {
+      "pde_type": "grin_fiber",
+      "suffix": "grinfiber_GRFinA1.50T1.00_strength1.00e-01_evoT4.0e-01_steps200",
+      "dataset_path": "replication_runs/original_setup_20260614_073412/functional_coverage/datasets/dataset_grin_fiber_Nin64_Nout32_grinfiber_GRFinA1.50T1.00_strength1.00e-01_evoT4.0e-01_steps200.npz",
+      "model_path": "replication_runs/original_setup_20260614_073412/functional_coverage/models/snn_PDEgrin_fiber_Kin64_Kout32_H64_L3_grinfiber_GRFinA1.50T1.00_strength1.00e-01_evoT4.0e-01_steps200.pth",
+      "n_grid_sim_input_ds": 64,
+      "snn_output_res": 32,
+      "num_test_samples": 150,
+      "calib_split_ratio": 0.5,
+      "random_seed": 42,
+      "sobolev_orders": [
+        1.0,
+        2.0
+      ],
+      "summary": {
+        "rel_l2_truncated_spectral": {
+          "mean": 0.6321774625382326,
+          "median": 0.6279762151623598,
+          "std": 0.07418713167418714,
+          "se": 0.006057353936080881,
+          "p90": 0.724568707775471,
+          "p95": 0.7546667040306391,
+          "min": 0.48725936714629625,
+          "max": 0.832289830878835
+        },
+        "rel_l2_full_spectral": {
+          "mean": 0.6484224166703644,
+          "median": 0.6439261867557093,
+          "std": 0.07301984180685779,
+          "se": 0.005962045117518282,
+          "p90": 0.7388431794398511,
+          "p95": 0.7667806042176842,
+          "min": 0.5053736596678438,
+          "max": 0.8429951084891251
+        },
+        "rel_l2_full_spatial": {
+          "mean": 0.6484224383036296,
+          "median": 0.6439262330532074,
+          "std": 0.07301983921859087,
+          "se": 0.005962044906187173,
+          "p90": 0.7388431906700134,
+          "p95": 0.7667806506156921,
+          "min": 0.5053737163543701,
+          "max": 0.8429949283599854
+        },
+        "rel_H1_truncated": {
+          "mean": 0.9542527189197282,
+          "median": 0.9559679128287675,
+          "std": 0.014222388265648839,
+          "se": 0.0011612531391528888,
+          "p90": 0.9721287179790129,
+          "p95": 0.9757176079476403,
+          "min": 0.9170830001183017,
+          "max": 0.9784293076681128
+        },
+        "rel_H1_full": {
+          "mean": 0.9780527281135193,
+          "median": 0.9791414378466416,
+          "std": 0.007061172219201204,
+          "se": 0.0005765422974319627,
+          "p90": 0.9869036201290129,
+          "p95": 0.9883794364279109,
+          "min": 0.9592267199973211,
+          "max": 0.989834346308529
+        },
+        "rel_H2_truncated": {
+          "mean": 1.0099954051164661,
+          "median": 1.010233553318125,
+          "std": 0.005462564274538701,
+          "se": 0.0004460165053258794,
+          "p90": 1.0166226429940501,
+          "p95": 1.0190207917829712,
+          "min": 0.9980699623220899,
+          "max": 1.0269837497199366
+        },
+        "rel_H2_full": {
+          "mean": 1.0012590542223627,
+          "median": 1.001259452031277,
+          "std": 0.0006927970234095894,
+          "se": 5.656664008908355e-05,
+          "p90": 1.0020830637944425,
+          "p95": 1.002407600165023,
+          "min": 0.9997429499142464,
+          "max": 1.0034633452804897
+        }
+      }
+    },
+    {
+      "pde_type": "grin_fiber",
+      "suffix": "grinfiber_GRFinA1.50T1.00_strength1.00e-01_evoT4.0e-01_steps200",
+      "dataset_path": "replication_runs/original_setup_20260614_073412/functional_coverage/datasets/dataset_grin_fiber_Nin64_Nout48_grinfiber_GRFinA1.50T1.00_strength1.00e-01_evoT4.0e-01_steps200.npz",
+      "model_path": "replication_runs/original_setup_20260614_073412/functional_coverage/models/snn_PDEgrin_fiber_Kin64_Kout48_H64_L3_grinfiber_GRFinA1.50T1.00_strength1.00e-01_evoT4.0e-01_steps200.pth",
+      "n_grid_sim_input_ds": 64,
+      "snn_output_res": 48,
+      "num_test_samples": 150,
+      "calib_split_ratio": 0.5,
+      "random_seed": 42,
+      "sobolev_orders": [
+        1.0,
+        2.0
+      ],
+      "summary": {
+        "rel_l2_truncated_spectral": {
+          "mean": 0.7015624162851558,
+          "median": 0.6963452946514705,
+          "std": 0.06869403417441168,
+          "se": 0.005608844403353951,
+          "p90": 0.7896550136430375,
+          "p95": 0.8168045293596675,
+          "min": 0.5411397618696001,
+          "max": 0.882889498118037
+        },
+        "rel_l2_full_spectral": {
+          "mean": 0.7057438270183184,
+          "median": 0.7005780701041463,
+          "std": 0.0683162502483704,
+          "se": 0.0055779984749597345,
+          "p90": 0.7934025196353233,
+          "p95": 0.8204456227533818,
+          "min": 0.5455935822870344,
+          "max": 0.885493363848333
+        },
+        "rel_l2_full_spatial": {
+          "mean": 0.7057438345750173,
+          "median": 0.700577974319458,
+          "std": 0.06831626143545053,
+          "se": 0.005577999388381002,
+          "p90": 0.7934023797512054,
+          "p95": 0.8204456627368927,
+          "min": 0.5455936789512634,
+          "max": 0.885493278503418
+        },
+        "rel_H1_truncated": {
+          "mean": 0.9851352310550265,
+          "median": 0.9851190506732095,
+          "std": 0.007936185724984128,
+          "se": 0.0006479868510056967,
+          "p90": 0.9948386096986056,
+          "p95": 0.9970668925656092,
+          "min": 0.9593706839767877,
+          "max": 1.003429990246047
+        },
+        "rel_H1_full": {
+          "mean": 0.9889915594688963,
+          "median": 0.9890943774920413,
+          "std": 0.005914937848182834,
+          "se": 0.00048295265294412854,
+          "p90": 0.9962085382234327,
+          "p95": 0.9978417138490262,
+          "min": 0.9703227834174653,
+          "max": 1.0025094017843135
+        },
+        "rel_H2_truncated": {
+          "mean": 1.0122670513333112,
+          "median": 1.0120714878736536,
+          "std": 0.003226460894449306,
+          "se": 0.0002634394288814871,
+          "p90": 1.0161052373229635,
+          "p95": 1.0173243268688696,
+          "min": 1.002684757536723,
+          "max": 1.0221886227535797
+        },
+        "rel_H2_full": {
+          "mean": 1.00518068259348,
+          "median": 1.0051213183887573,
+          "std": 0.0013569097033098053,
+          "se": 0.00011079121333801112,
+          "p90": 1.0069352172467665,
+          "p95": 1.0073397401166,
+          "min": 1.0011288161572907,
+          "max": 1.0095004265984264
+        }
+      }
+    },
+    {
+      "pde_type": "grin_fiber",
+      "suffix": "grinfiber_GRFinA1.50T1.00_strength1.00e-01_evoT4.0e-01_steps200",
+      "dataset_path": "replication_runs/original_setup_20260614_073412/functional_coverage/datasets/dataset_grin_fiber_Nin64_Nout64_grinfiber_GRFinA1.50T1.00_strength1.00e-01_evoT4.0e-01_steps200.npz",
+      "model_path": "replication_runs/original_setup_20260614_073412/functional_coverage/models/snn_PDEgrin_fiber_Kin64_Kout64_H64_L3_grinfiber_GRFinA1.50T1.00_strength1.00e-01_evoT4.0e-01_steps200.pth",
+      "n_grid_sim_input_ds": 64,
+      "snn_output_res": 64,
+      "num_test_samples": 150,
+      "calib_split_ratio": 0.5,
+      "random_seed": 42,
+      "sobolev_orders": [
+        1.0,
+        2.0
+      ],
+      "summary": {
+        "rel_l2_truncated_spectral": {
+          "mean": 0.6787555544355388,
+          "median": 0.6830344208761128,
+          "std": 0.07291803505757319,
+          "se": 0.005953732631247657,
+          "p90": 0.771664323920506,
+          "p95": 0.7800516085448849,
+          "min": 0.49128184274084075,
+          "max": 0.8901729478690323
+        },
+        "rel_l2_full_spectral": {
+          "mean": 0.6787555544355388,
+          "median": 0.6830344208761128,
+          "std": 0.07291803505757319,
+          "se": 0.005953732631247657,
+          "p90": 0.771664323920506,
+          "p95": 0.7800516085448849,
+          "min": 0.49128184274084075,
+          "max": 0.8901729478690323
+        },
+        "rel_l2_full_spatial": {
+          "mean": 0.6787555704514185,
+          "median": 0.6830344796180725,
+          "std": 0.07291804154665797,
+          "se": 0.005953733161079211,
+          "p90": 0.7716644108295441,
+          "p95": 0.7800515323877334,
+          "min": 0.4912818372249603,
+          "max": 0.8901730179786682
+        },
+        "rel_H1_truncated": {
+          "mean": 0.9847779927188909,
+          "median": 0.9854746311835115,
+          "std": 0.006140957983775731,
+          "se": 0.0005014071197373707,
+          "p90": 0.991532342366444,
+          "p95": 0.9930400679122338,
+          "min": 0.9692568586899092,
+          "max": 0.9984989910812289
+        },
+        "rel_H1_full": {
+          "mean": 0.9847779927188909,
+          "median": 0.9854746311835115,
+          "std": 0.006140957983775731,
+          "se": 0.0005014071197373707,
+          "p90": 0.991532342366444,
+          "p95": 0.9930400679122338,
+          "min": 0.9692568586899092,
+          "max": 0.9984989910812289
+        },
+        "rel_H2_truncated": {
+          "mean": 1.0171159104234895,
+          "median": 1.0169455282372653,
+          "std": 0.004790710415825873,
+          "se": 0.000391159867473667,
+          "p90": 1.0236785040270593,
+          "p95": 1.025390393721531,
+          "min": 1.0076395783183136,
+          "max": 1.033199336336686
+        },
+        "rel_H2_full": {
+          "mean": 1.0171159104234895,
+          "median": 1.0169455282372653,
+          "std": 0.004790710415825873,
+          "se": 0.000391159867473667,
+          "p90": 1.0236785040270593,
+          "p95": 1.025390393721531,
+          "min": 1.0076395783183136,
+          "max": 1.033199336336686
+        }
+      }
+    },
+    {
+      "pde_type": "grin_fiber",
+      "suffix": "grinfiber_GRFinA1.75T1.00_strength1.00e-01_evoT4.0e-01_steps200",
+      "dataset_path": "replication_runs/original_setup_20260614_073412/functional_coverage/datasets/dataset_grin_fiber_Nin64_Nout32_grinfiber_GRFinA1.75T1.00_strength1.00e-01_evoT4.0e-01_steps200.npz",
+      "model_path": "replication_runs/original_setup_20260614_073412/functional_coverage/models/snn_PDEgrin_fiber_Kin64_Kout32_H64_L3_grinfiber_GRFinA1.75T1.00_strength1.00e-01_evoT4.0e-01_steps200.pth",
+      "n_grid_sim_input_ds": 64,
+      "snn_output_res": 32,
+      "num_test_samples": 150,
+      "calib_split_ratio": 0.5,
+      "random_seed": 42,
+      "sobolev_orders": [
+        1.0,
+        2.0
+      ],
+      "summary": {
+        "rel_l2_truncated_spectral": {
+          "mean": 0.5270308476604171,
+          "median": 0.5195397011990118,
+          "std": 0.07369474559235559,
+          "se": 0.0060171507808496946,
+          "p90": 0.6221088233067597,
+          "p95": 0.6460418605092747,
+          "min": 0.360815023379504,
+          "max": 0.7614818775689207
+        },
+        "rel_l2_full_spectral": {
+          "mean": 0.5350346926977005,
+          "median": 0.5278590836488333,
+          "std": 0.0736994094522622,
+          "se": 0.006017531583416461,
+          "p90": 0.6292824153598452,
+          "p95": 0.6532527325549766,
+          "min": 0.36732364961172115,
+          "max": 0.7671588418086622
+        },
+        "rel_l2_full_spatial": {
+          "mean": 0.5350346970558166,
+          "median": 0.5278591215610504,
+          "std": 0.0736994089328554,
+          "se": 0.006017531541007075,
+          "p90": 0.6292824447154999,
+          "p95": 0.6532527804374694,
+          "min": 0.367323637008667,
+          "max": 0.7671588063240051
+        },
+        "rel_H1_truncated": {
+          "mean": 0.9036591467152018,
+          "median": 0.9039246360118056,
+          "std": 0.026614478066161754,
+          "se": 0.002173063034419703,
+          "p90": 0.9390777701366338,
+          "p95": 0.9446759975859637,
+          "min": 0.8392185303047486,
+          "max": 0.9628499141206092
+        },
+        "rel_H1_full": {
+          "mean": 0.9390071304762541,
+          "median": 0.9391829773311301,
+          "std": 0.017738772466146305,
+          "se": 0.0014483647068463344,
+          "p90": 0.9612978402164322,
+          "p95": 0.9661758527926082,
+          "min": 0.8927960729931804,
+          "max": 0.9775391448300217
+        },
+        "rel_H2_truncated": {
+          "mean": 1.0060187008930703,
+          "median": 1.0058486572466152,
+          "std": 0.004546391583449275,
+          "se": 0.0003712113183444924,
+          "p90": 1.0115703132771923,
+          "p95": 1.0134124173869443,
+          "min": 0.9929122436190526,
+          "max": 1.024051851899479
+        },
+        "rel_H2_full": {
+          "mean": 1.0010615437164707,
+          "median": 1.0010191035697829,
+          "std": 0.0008045909543722162,
+          "se": 6.569457632902905e-05,
+          "p90": 1.0020201894163085,
+          "p95": 1.0024622304588533,
+          "min": 0.9986824343036055,
+          "max": 1.0044274700203302
+        }
+      }
+    },
+    {
+      "pde_type": "grin_fiber",
+      "suffix": "grinfiber_GRFinA1.75T1.00_strength1.00e-01_evoT4.0e-01_steps200",
+      "dataset_path": "replication_runs/original_setup_20260614_073412/functional_coverage/datasets/dataset_grin_fiber_Nin64_Nout48_grinfiber_GRFinA1.75T1.00_strength1.00e-01_evoT4.0e-01_steps200.npz",
+      "model_path": "replication_runs/original_setup_20260614_073412/functional_coverage/models/snn_PDEgrin_fiber_Kin64_Kout48_H64_L3_grinfiber_GRFinA1.75T1.00_strength1.00e-01_evoT4.0e-01_steps200.pth",
+      "n_grid_sim_input_ds": 64,
+      "snn_output_res": 48,
+      "num_test_samples": 150,
+      "calib_split_ratio": 0.5,
+      "random_seed": 42,
+      "sobolev_orders": [
+        1.0,
+        2.0
+      ],
+      "summary": {
+        "rel_l2_truncated_spectral": {
+          "mean": 0.5095149510239219,
+          "median": 0.5004821511845471,
+          "std": 0.07017389328519287,
+          "se": 0.00572967439377471,
+          "p90": 0.5914802669510578,
+          "p95": 0.6439294830237587,
+          "min": 0.3790712759552759,
+          "max": 0.7454793341895515
+        },
+        "rel_l2_full_spectral": {
+          "mean": 0.5120841103187204,
+          "median": 0.5029629830666865,
+          "std": 0.07025237746792153,
+          "se": 0.005736082600460195,
+          "p90": 0.5939417010189608,
+          "p95": 0.6465435894295837,
+          "min": 0.38101728176812394,
+          "max": 0.7479220224567174
+        },
+        "rel_l2_full_spatial": {
+          "mean": 0.5120841199159623,
+          "median": 0.5029629468917847,
+          "std": 0.07025237779023359,
+          "se": 0.005736082626776865,
+          "p90": 0.5939417660236359,
+          "p95": 0.6465436875820156,
+          "min": 0.3810173273086548,
+          "max": 0.7479220628738403
+        },
+        "rel_H1_truncated": {
+          "mean": 0.9222042551493811,
+          "median": 0.9227802937772267,
+          "std": 0.020184910880476525,
+          "se": 0.001648091072023994,
+          "p90": 0.9471800169755036,
+          "p95": 0.9536515918079279,
+          "min": 0.8728721039837849,
+          "max": 0.9783672793198734
+        },
+        "rel_H1_full": {
+          "mean": 0.9353400170742784,
+          "median": 0.9360502829872344,
+          "std": 0.01720074699938788,
+          "se": 0.0014044351114403048,
+          "p90": 0.956096347871828,
+          "p95": 0.9621173953213404,
+          "min": 0.8918992418314207,
+          "max": 0.9822006196927998
+        },
+        "rel_H2_truncated": {
+          "mean": 1.0195259202387164,
+          "median": 1.0183670450625955,
+          "std": 0.006610395174285949,
+          "se": 0.0005397365058385618,
+          "p90": 1.0289134516070435,
+          "p95": 1.0330192152753819,
+          "min": 1.0070091036912825,
+          "max": 1.0420087075855116
+        },
+        "rel_H2_full": {
+          "mean": 1.0095762987752335,
+          "median": 1.0091505674764627,
+          "std": 0.0032609261724731754,
+          "se": 0.0002662535070482084,
+          "p90": 1.0141912525126104,
+          "p95": 1.0162552497234156,
+          "min": 1.0035471655944042,
+          "max": 1.020587806147711
+        }
+      }
+    },
+    {
+      "pde_type": "grin_fiber",
+      "suffix": "grinfiber_GRFinA1.75T1.00_strength1.00e-01_evoT4.0e-01_steps200",
+      "dataset_path": "replication_runs/original_setup_20260614_073412/functional_coverage/datasets/dataset_grin_fiber_Nin64_Nout64_grinfiber_GRFinA1.75T1.00_strength1.00e-01_evoT4.0e-01_steps200.npz",
+      "model_path": "replication_runs/original_setup_20260614_073412/functional_coverage/models/snn_PDEgrin_fiber_Kin64_Kout64_H64_L3_grinfiber_GRFinA1.75T1.00_strength1.00e-01_evoT4.0e-01_steps200.pth",
+      "n_grid_sim_input_ds": 64,
+      "snn_output_res": 64,
+      "num_test_samples": 150,
+      "calib_split_ratio": 0.5,
+      "random_seed": 42,
+      "sobolev_orders": [
+        1.0,
+        2.0
+      ],
+      "summary": {
+        "rel_l2_truncated_spectral": {
+          "mean": 0.606366791212109,
+          "median": 0.6024967515840974,
+          "std": 0.07353014741281169,
+          "se": 0.006003711395767243,
+          "p90": 0.6971914756609265,
+          "p95": 0.7268247940131977,
+          "min": 0.42647369662330203,
+          "max": 0.8176313118685539
+        },
+        "rel_l2_full_spectral": {
+          "mean": 0.606366791212109,
+          "median": 0.6024967515840974,
+          "std": 0.07353014741281169,
+          "se": 0.006003711395767243,
+          "p90": 0.6971914756609265,
+          "p95": 0.7268247940131977,
+          "min": 0.42647369662330203,
+          "max": 0.8176313118685539
+        },
+        "rel_l2_full_spatial": {
+          "mean": 0.6063667976856232,
+          "median": 0.6024966537952423,
+          "std": 0.07353013824458916,
+          "se": 0.006003710647185008,
+          "p90": 0.6971913516521454,
+          "p95": 0.7268248140811918,
+          "min": 0.4264737367630005,
+          "max": 0.8176313042640686
+        },
+        "rel_H1_truncated": {
+          "mean": 1.0112513313012617,
+          "median": 1.0117546625156733,
+          "std": 0.007127417187741674,
+          "se": 0.0005819511764636585,
+          "p90": 1.0209192855987321,
+          "p95": 1.0221621964876115,
+          "min": 0.9883206040602475,
+          "max": 1.0311766506537703
+        },
+        "rel_H1_full": {
+          "mean": 1.0112513313012617,
+          "median": 1.0117546625156733,
+          "std": 0.007127417187741674,
+          "se": 0.0005819511764636585,
+          "p90": 1.0209192855987321,
+          "p95": 1.0221621964876115,
+          "min": 0.9883206040602475,
+          "max": 1.0311766506537703
+        },
+        "rel_H2_truncated": {
+          "mean": 1.262087303291265,
+          "median": 1.2552699602943713,
+          "std": 0.07343181519722233,
+          "se": 0.005995682603984867,
+          "p90": 1.3523866061347178,
+          "p95": 1.3837526088274448,
+          "min": 1.1251581403235695,
+          "max": 1.5087910174920205
+        },
+        "rel_H2_full": {
+          "mean": 1.262087303291265,
+          "median": 1.2552699602943713,
+          "std": 0.07343181519722233,
+          "se": 0.005995682603984867,
+          "p90": 1.3523866061347178,
+          "p95": 1.3837526088274448,
+          "min": 1.1251581403235695,
+          "max": 1.5087910174920205
+        }
+      }
+    }
+  ]
+}

@@ -160,3 +160,10 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# Local experiment artifacts
+.mplconfig/
+results_dataset_gen_pde_v3/
+replication_runs/*
+!replication_runs/final_selected_20260615/
+!replication_runs/final_selected_20260615/**

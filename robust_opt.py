@@ -244,11 +244,11 @@ def main(args):
     if args.pde_type == "poisson":
         calib_filename_suffix = f"poisson_grfA{args.grf_alpha:.1f}T{args.grf_tau:.1f}OffS{args.grf_offset_sigma:.1f}"
     elif args.pde_type == "step_index_fiber":
-        calib_filename_suffix = (f"fiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+        calib_filename_suffix = (f"fiber_GRFinA{args.grf_alpha:.2f}T{args.grf_tau:.2f}_"
                                  f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
                                  f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
     elif args.pde_type == "grin_fiber":
-        calib_filename_suffix = (f"grinfiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+        calib_filename_suffix = (f"grinfiber_GRFinA{args.grf_alpha:.2f}T{args.grf_tau:.2f}_"
                                  f"strength{args.grin_strength:.2e}_"
                                  f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
 
@@ -507,11 +507,11 @@ def main(args):
     if args.pde_type == "poisson":
         filename_suffix_run = f"poisson_grfA{args.grf_alpha:.1f}T{args.grf_tau:.1f}OffS{args.grf_offset_sigma:.1f}"
     elif args.pde_type == "step_index_fiber":
-        filename_suffix_run = (f"fiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+        filename_suffix_run = (f"fiber_GRFinA{args.grf_alpha:.2f}T{args.grf_tau:.2f}_"
                                f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
                                f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
     elif args.pde_type == "grin_fiber":
-        filename_suffix_run = (f"grinfiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+        filename_suffix_run = (f"grinfiber_GRFinA{args.grf_alpha:.2f}T{args.grf_tau:.2f}_"
                            f"strength{args.grin_strength:.2e}_"
                            f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
 
@@ -626,11 +626,11 @@ if __name__ == '__main__':
     if args.pde_type == "poisson":
         snn_filename_suffix = f"poisson_grfA{args.grf_alpha:.1f}T{args.grf_tau:.1f}OffS{args.grf_offset_sigma:.1f}"
     elif args.pde_type == "step_index_fiber":
-        snn_filename_suffix = (f"fiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+        snn_filename_suffix = (f"fiber_GRFinA{args.grf_alpha:.2f}T{args.grf_tau:.2f}_"
                                f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
                                f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
     elif args.pde_type == "grin_fiber":
-        snn_filename_suffix = (f"grinfiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+        snn_filename_suffix = (f"grinfiber_GRFinA{args.grf_alpha:.2f}T{args.grf_tau:.2f}_"
                                f"strength{args.grin_strength:.2e}_"
                                f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
     

@@ -367,15 +367,15 @@ if __name__ == '__main__':
     if args.pde_type == "poisson":
         filename_suffix = f"poisson_grfA{args.grf_alpha:.1f}T{args.grf_tau:.1f}OffS{args.grf_offset_sigma:.1f}"
     elif args.pde_type == "step_index_fiber":
-        filename_suffix = (f"fiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+        filename_suffix = (f"fiber_GRFinA{args.grf_alpha:.2f}T{args.grf_tau:.2f}_"
                            f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
                            f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
     elif args.pde_type == "grin_fiber":
-        filename_suffix = (f"grinfiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+        filename_suffix = (f"grinfiber_GRFinA{args.grf_alpha:.2f}T{args.grf_tau:.2f}_"
                            f"strength{args.grin_strength:.2e}_"
                            f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
     elif args.pde_type == "heat_equation":
-        filename_suffix = (f"heat_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+        filename_suffix = (f"heat_GRFinA{args.grf_alpha:.2f}T{args.grf_tau:.2f}_"
                            f"nu{args.viscosity_nu:.2e}_evoT{args.evolution_time_T:.1e}")
     
     print(f"--- Generating dataset for PDE Type '{args.pde_type}' ---")
@@ -446,15 +446,15 @@ if __name__ == '__main__':
         # --- Visualization (identical to before, just using the train split data) ---
         fig_spec, axes_spec = plt.subplots(1, 3, figsize=(18, 5)) 
         im0_spec = axes_spec[0].imshow(np.abs(gb_full_sample_spec))
-        axes_spec[0].set_title(f"Input $\gamma_b$ Spectrum ($N_{{in}}={args.n_grid_sim_input}$)")
+        axes_spec[0].set_title(f"Input $\\gamma_b$ Spectrum ($N_{{in}}={args.n_grid_sim_input}$)")
         plt.colorbar(im0_spec, ax=axes_spec[0])
         
         im1_spec = axes_spec[1].imshow(np.abs(ga_snn_target_sample_spec))
-        axes_spec[1].set_title(f"Target $\gamma_a$ Spectrum ($N_{{out}}={args.k_trunc_snn_output}$)")
+        axes_spec[1].set_title(f"Target $\\gamma_a$ Spectrum ($N_{{out}}={args.k_trunc_snn_output}$)")
         plt.colorbar(im1_spec, ax=axes_spec[1])
 
         im2_spec = axes_spec[2].imshow(np.abs(ga_true_full_sample_spec))
-        axes_spec[2].set_title(f"True Full $\gamma_a$ Spectrum ($N_{{in}}={args.n_grid_sim_input}$)")
+        axes_spec[2].set_title(f"True Full $\\gamma_a$ Spectrum ($N_{{in}}={args.n_grid_sim_input}$)")
         plt.colorbar(im2_spec, ax=axes_spec[2])
 
         fig_spec.suptitle(f"Dataset Sample Spectra (PDE: {args.pde_type.upper()}, Params: {filename_suffix})", fontsize=14)

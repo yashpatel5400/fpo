@@ -1,0 +1,39 @@
+{
+  "pde_type": "poisson",
+  "grf_alpha_values": [
+    0.75
+  ],
+  "k_snn_output_res_values": [
+    6
+  ],
+  "n_grid_sim_input_ds": 64,
+  "evolution_time_T": 0.1,
+  "viscosity_nu": 0.01,
+  "alpha_for_radius": 0.1,
+  "collection_radius_scale": 1.0,
+  "collection_lr": 0.15,
+  "collection_tau": 1.5,
+  "hard_refine_iters": 0,
+  "hard_refine_step_px": 1,
+  "eval_field": "full",
+  "save_opt_traces": true,
+  "trace_trials": 5,
+  "trace_every": 25,
+  "viz_trials": 0,
+  "results": [
+    {
+      "rho": 0.75,
+      "nout": 6,
+      "mean_nom": 831.9984802246094,
+      "mean_rob": 837.9305709838867,
+      "mean_diff": 5.932090759277344,
+      "se_diff": 10.355260801456106,
+      "std_diff": 46.310134153589615,
+      "n": 20,
+      "cohen_dz": 0.1280948731351825,
+      "t_stat": 0.5728576877989594,
+      "p_ttest_greater": 0.2867293474044772,
+      "sign_test_two_sided_p": 0.8238029479980469
+    }
+  ]
+}

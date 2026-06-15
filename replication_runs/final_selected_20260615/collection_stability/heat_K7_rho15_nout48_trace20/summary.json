@@ -1,0 +1,39 @@
+{
+  "pde_type": "heat_equation",
+  "grf_alpha_values": [
+    1.5
+  ],
+  "k_snn_output_res_values": [
+    48
+  ],
+  "n_grid_sim_input_ds": 64,
+  "evolution_time_T": 0.2,
+  "viscosity_nu": 0.01,
+  "alpha_for_radius": 0.1,
+  "collection_radius_scale": 1.0,
+  "collection_lr": 0.15,
+  "collection_tau": 1.5,
+  "hard_refine_iters": 0,
+  "hard_refine_step_px": 1,
+  "eval_field": "full",
+  "save_opt_traces": true,
+  "trace_trials": 5,
+  "trace_every": 25,
+  "viz_trials": 0,
+  "results": [
+    {
+      "rho": 1.5,
+      "nout": 48,
+      "mean_nom": 2050.2275512695314,
+      "mean_rob": 2041.1173889160157,
+      "mean_diff": -9.110162353515625,
+      "se_diff": 11.016434138119493,
+      "std_diff": 49.26699120496899,
+      "n": 20,
+      "cohen_dz": -0.18491412060488865,
+      "t_stat": -0.8269610873442513,
+      "p_ttest_greater": 0.7907378938419669,
+      "sign_test_two_sided_p": 0.8238029479980469
+    }
+  ]
+}

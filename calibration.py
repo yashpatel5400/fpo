@@ -136,6 +136,9 @@ if __name__ == '__main__':
     parser.add_argument('--nu_theorem', type=float, default=2.0) 
     parser.add_argument('--d_dimensions', type=int, default=2, choices=[1,2])
     parser.add_argument('--elliptic_PDE_const_C_sq', type=float, default=4.0)
+    parser.add_argument('--fiber_bound_type', type=str, default="graph_equiv",
+                        choices=["graph_equiv", "input_laplacian"],
+                        help="Tail bound used for fiber examples. input_laplacian uses a sharper H^2 graph-norm estimate.")
 
     # --- Conformal Prediction Parameters ---
     parser.add_argument('--calib_split_ratio', type=float, default=0.5)
@@ -175,15 +178,15 @@ if __name__ == '__main__':
     if args.pde_type == "poisson":
         filename_suffix = f"poisson_grfA{args.grf_alpha:.1f}T{args.grf_tau:.1f}OffS{args.grf_offset_sigma:.1f}"
     elif args.pde_type == "step_index_fiber":
-        filename_suffix = (f"fiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+        filename_suffix = (f"fiber_GRFinA{args.grf_alpha:.2f}T{args.grf_tau:.2f}_"
                            f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
                            f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
     elif args.pde_type == "grin_fiber":
-        filename_suffix = (f"grinfiber_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+        filename_suffix = (f"grinfiber_GRFinA{args.grf_alpha:.2f}T{args.grf_tau:.2f}_"
                            f"strength{args.grin_strength:.2e}_"
                            f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
     elif args.pde_type == "heat_equation":
-        filename_suffix = (f"heat_GRFinA{args.grf_alpha:.1f}T{args.grf_tau:.1f}_"
+        filename_suffix = (f"heat_GRFinA{args.grf_alpha:.2f}T{args.grf_tau:.2f}_"
                            f"nu{args.viscosity_nu:.2e}_evoT{args.evolution_time_T:.1e}")
 
     
@@ -305,10 +308,19 @@ if __name__ == '__main__':
     
     weights_source_Hs_minus_2_Nfull = None
     weights_source_Hs_Nfull = None
+    laplacian_weights_Nfull = None
     if args.pde_type == "poisson":
         _, weights_source_Hs_minus_2_Nfull = get_mode_indices_and_weights(N_full_for_theorem, args.d_dimensions, args.s_theorem - 2, 0)
     if args.pde_type in ["step_index_fiber", "grin_fiber", "heat_equation"]:
         _, weights_source_Hs_Nfull = get_mode_indices_and_weights(N_full_for_theorem, args.d_dimensions, args.s_theorem, 0)
+    if args.pde_type in ["step_index_fiber", "grin_fiber"] and args.fiber_bound_type == "input_laplacian":
+        if not np.isclose(args.s_theorem, 2.0):
+            raise ValueError("fiber_bound_type='input_laplacian' currently implements the H^2 graph-norm bound and requires s_theorem=2.")
+        n_grids_Nfull, _ = get_mode_indices_and_weights(N_full_for_theorem, args.d_dimensions, 0, 0)
+        norm_n_L2_sq_Nfull = np.zeros_like(n_grids_Nfull[0], dtype=float)
+        for mode_grid in n_grids_Nfull:
+            norm_n_L2_sq_Nfull += mode_grid**2
+        laplacian_weights_Nfull = norm_n_L2_sq_Nfull**2
 
     print("\nCalculating empirical coverage on test set...")
     with torch.no_grad():
@@ -342,7 +354,17 @@ if __name__ == '__main__':
                              print(f"Warning: weights_source_Hs_minus_2_Nfull for Poisson B_value calculation is empty/problematic. Using fallback B=1.0.")
                 elif args.pde_type == "step_index_fiber" or args.pde_type == "grin_fiber":
                     input_state_coeffs_Nfull = gb_full_test_complex
-                    if weights_source_Hs_Nfull is not None and weights_source_Hs_Nfull.size > 0:
+                    if args.fiber_bound_type == "input_laplacian" and laplacian_weights_Nfull is not None:
+                        l2_norm_sq = np.sum(np.abs(input_state_coeffs_Nfull)**2)
+                        delta_norm = np.sqrt(np.sum(laplacian_weights_Nfull * np.abs(input_state_coeffs_Nfull)**2))
+                        l2_norm = np.sqrt(l2_norm_sq)
+                        V_inf = 0
+                        if args.pde_type == "step_index_fiber":
+                            V_inf = args.fiber_potential_depth
+                        elif args.pde_type == "grin_fiber":
+                            V_inf = args.grin_strength * (args.L_domain**2 / 2.0)
+                        B_value_this_sample = 2.0 * (l2_norm_sq + (delta_norm + 2.0 * V_inf * l2_norm)**2)
+                    elif weights_source_Hs_Nfull is not None and weights_source_Hs_Nfull.size > 0:
                         norm_input_Hs_sq = np.sum(weights_source_Hs_Nfull * np.abs(input_state_coeffs_Nfull)**2)
                         V_inf = 0
                         if args.pde_type == "step_index_fiber":
@@ -367,7 +389,12 @@ if __name__ == '__main__':
                     B_value_this_sample = 1.0 
                 
                 correction_term_this_sample = 0.0
-                if np.isclose(args.nu_theorem, 0.0):
+                if args.pde_type == "heat_equation" and snn_output_res_val > 0:
+                    cutoff_N = max(1, snn_output_res_val // 2)
+                    heat_decay = np.exp(-2.0 * args.viscosity_nu * args.evolution_time_T * cutoff_N**2)
+                    sobolev_tail = (1.0 + cutoff_N**2)**(-args.nu_theorem)
+                    correction_term_this_sample = B_value_this_sample * heat_decay * sobolev_tail
+                elif np.isclose(args.nu_theorem, 0.0):
                     correction_term_this_sample = B_value_this_sample 
                 else: 
                     if snn_output_res_val > 0: 
@@ -403,7 +430,7 @@ if __name__ == '__main__':
     if not args.no_plot: 
         plt.figure(figsize=(8,6))
         plt.plot(1-alpha_values_for_quantiles, empirical_coverages_theorem, marker='s',label='Empirical Coverage (with B term)')
-        plt.plot(1-alpha_values_for_quantiles, empirical_coverages_no_correction, marker='x', linestyle='--', label='Empirical Coverage (No B term, only $\widehat{q}_{\\nu}$)')
+        plt.plot(1-alpha_values_for_quantiles, empirical_coverages_no_correction, marker='x', linestyle='--', label='Empirical Coverage (No B term, only $\\widehat{q}_{\\nu}$)')
         plt.plot([0,1],[0,1],linestyle=':',color='gray',label='Ideal')
         plt.xlabel("Nominal Coverage ($1-\\alpha$)")
         plt.ylabel("Empirical Coverage")
@@ -429,8 +456,11 @@ if __name__ == '__main__':
         elif args.pde_type == "grin_fiber":
              V_inf_for_str = args.grin_strength * (args.L_domain**2 / 2.0)
         
-        factor_for_B = (np.max([2, (1 + 2 * V_inf_for_str**2)]))**args.s_theorem
-        save_B_info_str = f"Fiber_Vinf_{V_inf_for_str:.2e}_s_{args.s_theorem}_factor_{factor_for_B:.2e}"
+        if args.fiber_bound_type == "input_laplacian":
+            save_B_info_str = f"Fiber_InputLaplacian_Vinf_{V_inf_for_str:.2e}_s_{args.s_theorem}"
+        else:
+            factor_for_B = (np.max([2, (1 + 2 * V_inf_for_str**2)]))**args.s_theorem
+            save_B_info_str = f"Fiber_Vinf_{V_inf_for_str:.2e}_s_{args.s_theorem}_factor_{factor_for_B:.2e}"
     elif args.pde_type == "heat_equation":
         save_B_info_str = f"HeatEq_nu_{args.viscosity_nu:.2e}_T_{args.evolution_time_T:.1e}"
 
@@ -450,5 +480,6 @@ if __name__ == '__main__':
                         k_trunc_full_theorem_eval=N_full_for_theorem, 
                         s_theorem=args.s_theorem, 
                         nu_theorem=args.nu_theorem,
-                        d_dimensions=args.d_dimensions) 
+                        d_dimensions=args.d_dimensions,
+                        fiber_bound_type=args.fiber_bound_type)
     print(f"Coverage data saved to {coverage_data_filename}")

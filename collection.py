@@ -2,6 +2,7 @@ import os
 os.environ.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".mplconfig"))
 os.environ.setdefault("XDG_CACHE_HOME", os.path.join(os.getcwd(), ".cache"))
 import argparse
+import json
 import numpy as np
 import torch
 import torch.nn as nn
@@ -244,6 +245,58 @@ def visualize_side_by_side(u_pred, u_true, w_nom, w_rob, radius_px, title, out_p
     plt.savefig(out_path, bbox_inches='tight', pad_inches=0.02, dpi=200)
     plt.close(fig)
 
+def save_optimization_traces(trace_records, json_path, fig_path):
+    os.makedirs(os.path.dirname(json_path), exist_ok=True)
+    with open(json_path, "w") as f:
+        json.dump(trace_records, f, indent=2)
+    if not trace_records:
+        return
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
+    grouped = {}
+    for rec in trace_records:
+        key = (rec["trial"], rec["method"])
+        grouped.setdefault(key, []).append(rec)
+
+    for (trial, method), records in sorted(grouped.items()):
+        records = sorted(records, key=lambda x: x["global_iter"])
+        label = f"{method} t={trial}"
+        axes[0].plot(
+            [r["global_iter"] for r in records],
+            [r["objective"] for r in records],
+            marker="o",
+            markersize=2,
+            linewidth=1.2,
+            label=label,
+        )
+
+        finals = {}
+        for rec in records:
+            finals[(rec["stage_index"], rec["stage_factor"])] = rec
+        stage_items = sorted(finals.items())
+        axes[1].plot(
+            [i for i, _ in enumerate(stage_items)],
+            [item[1]["objective"] for item in stage_items],
+            marker="o",
+            linewidth=1.2,
+            label=label,
+        )
+
+    axes[0].set_xlabel("Cumulative Adam step")
+    axes[0].set_ylabel("Optimization objective")
+    axes[0].set_title("Objective traces")
+    axes[0].grid(True, alpha=0.3)
+    axes[1].set_xlabel("Resolution stage")
+    axes[1].set_ylabel("Final stage objective")
+    axes[1].set_title("Stage-end objectives")
+    axes[1].grid(True, alpha=0.3)
+    handles, labels = axes[0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc="center left", bbox_to_anchor=(0.98, 0.5), frameon=False)
+    fig.tight_layout(rect=[0, 0, 0.86, 1])
+    plt.savefig(fig_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
 def transform_resource_field(u_spatial, transform):
     u_real = u_spatial.real
     if transform == "real":
@@ -335,7 +388,9 @@ def optimize_softmask_adam(
     device: str = "cpu",
     return_mask: bool = False,
     use_robust: bool = True,
-    init_centers: list | None = None,
+    init_centers=None,
+    return_trace: bool = False,
+    trace_every: int = 25,
 ):
     """
     Gradient ascent on centers (continuous) using soft torus masks.
@@ -350,6 +405,7 @@ def optimize_softmask_adam(
     best_val = -1e30
     best_centers = None
     best_mask = None
+    best_trace = None
 
     for r in range(restarts):
         if init_centers is not None and len(init_centers) == K:
@@ -360,6 +416,7 @@ def optimize_softmask_adam(
             c0 = torch.rand(K, 2, device=device) * N
         c0.requires_grad_(True)
         opt = torch.optim.Adam([c0], lr=lr)
+        trace = []
 
         for t in range(steps):
             opt.zero_grad()
@@ -374,7 +431,17 @@ def optimize_softmask_adam(
                 dual = sobolev_dual_norm(M, s_minus_nu, weights=dual_weights)
                 obj = nominal + r_radius * dual
             else:
+                dual = torch.tensor(0.0, device=device)
                 obj = nominal
+
+            if return_trace and (t == 0 or (t + 1) % max(1, trace_every) == 0 or t == steps - 1):
+                trace.append({
+                    "restart": int(r),
+                    "iter": int(t + 1),
+                    "objective": float(obj.detach().cpu().item()),
+                    "nominal": float(nominal.detach().cpu().item()),
+                    "dual": float(dual.detach().cpu().item()),
+                })
 
             # gradient ASCENT
             loss = -obj
@@ -397,10 +464,16 @@ def optimize_softmask_adam(
             best_centers = c0.detach().cpu().numpy()
             if return_mask:
                 best_mask = M.detach().cpu().numpy()
+            if return_trace:
+                best_trace = trace
 
     centers_list = [(float(y), float(x)) for (y, x) in best_centers]
+    if return_mask and return_trace:
+        return centers_list, best_val, best_mask, best_trace
     if return_mask:
         return centers_list, best_val, best_mask
+    if return_trace:
+        return centers_list, best_val, best_trace
     return centers_list, best_val
 
 def main():
@@ -449,6 +522,14 @@ def main():
     p.add_argument('--iters', type=int, default=800)
     p.add_argument('--collection_restarts', type=int, default=3,
                    help='Number of random restarts for the initial collection optimization stage.')
+    p.add_argument('--collection_lr', type=float, default=0.15,
+                   help='Adam learning rate for differentiable soft-mask collection optimization.')
+    p.add_argument('--collection_tau', type=float, default=1.5,
+                   help='Soft-mask temperature in pixels for differentiable collection optimization.')
+    p.add_argument('--hard_refine_iters', type=int, default=0,
+                   help='If >0, run this many final hard-mask local-search refinement steps after soft-mask optimization.')
+    p.add_argument('--hard_refine_step_px', type=int, default=1,
+                   help='Pixel proposal radius for optional final hard-mask refinement.')
     p.add_argument('--step_px', type=int, default=3)
     p.add_argument('--trials', type=int, default=30)
     p.add_argument('--seed', type=int, default=0)
@@ -468,6 +549,12 @@ def main():
     p.add_argument('--viz_dir', type=str, default=None, help='Directory to save visualizations (defaults under results_out)')
     p.add_argument('--viz_show_true', action='store_true', help='Also render overlays on TRUE field')
     p.add_argument('--viz_vmax', type=float, default=None, help='Optional vmax for imshow')
+    p.add_argument('--save_opt_traces', action='store_true',
+                   help='Save objective-value traces for the first few nominal and regularized collection optimizations.')
+    p.add_argument('--trace_trials', type=int, default=3,
+                   help='Number of trials to include in optimization trace diagnostics.')
+    p.add_argument('--trace_every', type=int, default=25,
+                   help='Save one optimization trace point every this many Adam steps.')
 
     # output
     p.add_argument('--results_out', type=str, default='results_facet1_collection')
@@ -477,6 +564,21 @@ def main():
     def calib_suffix(a):
         if a.pde_type == "poisson":
             return f"poisson_grfA{a.grf_alpha:.1f}T{a.grf_tau:.1f}OffS{a.grf_offset_sigma:.1f}"
+        elif a.pde_type == "step_index_fiber":
+            return (f"fiber_GRFinA{a.grf_alpha:.2f}T{a.grf_tau:.2f}_"
+                    f"coreR{a.fiber_core_radius_factor:.1f}_V{a.fiber_potential_depth:.1f}_"
+                    f"evoT{a.evolution_time_T:.1e}_steps{a.solver_num_steps}")
+        elif a.pde_type == "grin_fiber":
+            return (f"grinfiber_GRFinA{a.grf_alpha:.2f}T{a.grf_tau:.2f}_"
+                    f"strength{a.grin_strength:.2e}_"
+                    f"evoT{a.evolution_time_T:.1e}_steps{a.solver_num_steps}")
+        elif a.pde_type == "heat_equation":
+            return (f"heat_GRFinA{a.grf_alpha:.2f}T{a.grf_tau:.2f}_"
+                    f"nu{a.viscosity_nu:.2e}_evoT{a.evolution_time_T:.1e}")
+
+    def legacy_calib_suffix(a):
+        if a.pde_type == "poisson":
+            return calib_suffix(a)
         elif a.pde_type == "step_index_fiber":
             return (f"fiber_GRFinA{a.grf_alpha:.1f}T{a.grf_tau:.1f}_"
                     f"coreR{a.fiber_core_radius_factor:.1f}_V{a.fiber_potential_depth:.1f}_"
@@ -489,22 +591,35 @@ def main():
             return (f"heat_GRFinA{a.grf_alpha:.1f}T{a.grf_tau:.1f}_"
                     f"nu{a.viscosity_nu:.2e}_evoT{a.evolution_time_T:.1e}")
 
+    def first_existing_path(path_templates, description):
+        attempted = []
+        for template in path_templates:
+            attempted.append(template)
+            if os.path.exists(template):
+                return template
+        raise FileNotFoundError(f"{description} not found; tried:\n  " + "\n  ".join(attempted))
+
     suffix = calib_suffix(args)
+    legacy_suffix = legacy_calib_suffix(args)
+    suffix_candidates = [suffix]
+    if legacy_suffix != suffix:
+        suffix_candidates.append(legacy_suffix)
 
     # dataset/model paths (same as your conventions)
-    dataset_file = os.path.join(
-        args.dataset_dir,
-        f"dataset_{args.pde_type}_Nin{args.n_grid_sim_input_ds}_Nout{args.snn_output_res}_{suffix}.npz"
-    )
-    model_file = os.path.join(
-        args.model_dir,
-        f"snn_PDE{args.pde_type}_Kin{args.n_grid_sim_input_ds}_Kout{args.snn_output_res}_H{args.snn_hidden_channels}_L{args.snn_num_hidden_layers}_{suffix}.pth"
-    )
-
-    if not os.path.exists(dataset_file):
-        raise FileNotFoundError(f"Dataset not found: {dataset_file}")
-    if not os.path.exists(model_file):
-        raise FileNotFoundError(f"Model not found: {model_file}")
+    dataset_file = first_existing_path([
+        os.path.join(
+            args.dataset_dir,
+            f"dataset_{args.pde_type}_Nin{args.n_grid_sim_input_ds}_Nout{args.snn_output_res}_{s}.npz"
+        )
+        for s in suffix_candidates
+    ], "Dataset")
+    model_file = first_existing_path([
+        os.path.join(
+            args.model_dir,
+            f"snn_PDE{args.pde_type}_Kin{args.n_grid_sim_input_ds}_Kout{args.snn_output_res}_H{args.snn_hidden_channels}_L{args.snn_num_hidden_layers}_{s}.pth"
+        )
+        for s in suffix_candidates
+    ], "Model")
 
     os.makedirs(args.results_out, exist_ok=True)
 
@@ -528,27 +643,24 @@ def main():
 
     # ----- get r = sqrt(q) for chosen alpha (deterministic paths from your scripts) -----
     # subdirectory (from calibration_sweep.py)
-    calib_subdir = (
-        f"PDE{args.pde_type}_NinDS{args.n_grid_sim_input_ds}_SNNres{args.snn_output_res}_"
-        f"KfullThm{args.n_grid_sim_input_ds}_s{args.s_theorem}_nu{args.nu_theorem}_{suffix}"
-    )
-    # filename (from calibration.py)
-    calib_filename = (
-        f"coverage_data_PDE{args.pde_type}_thm_s{args.s_theorem}_nu{args.nu_theorem}_d2"
-        f"_Nin{args.n_grid_sim_input_ds}_SNNout{args.snn_output_res}_NfullThm{args.n_grid_sim_input_ds}"
-        f"_{suffix}.npz"
-    )
-    calib_path_1 = os.path.join(args.calib_results_dir, calib_subdir, calib_filename)
-    calib_path_2 = os.path.join(args.calib_results_dir, calib_filename)
+    calib_candidates = []
+    for s in suffix_candidates:
+        calib_subdir = (
+            f"PDE{args.pde_type}_NinDS{args.n_grid_sim_input_ds}_SNNres{args.snn_output_res}_"
+            f"KfullThm{args.n_grid_sim_input_ds}_s{args.s_theorem}_nu{args.nu_theorem}_{s}"
+        )
+        calib_filename = (
+            f"coverage_data_PDE{args.pde_type}_thm_s{args.s_theorem}_nu{args.nu_theorem}_d2"
+            f"_Nin{args.n_grid_sim_input_ds}_SNNout{args.snn_output_res}_NfullThm{args.n_grid_sim_input_ds}"
+            f"_{s}.npz"
+        )
+        calib_candidates.append(os.path.join(args.calib_results_dir, calib_subdir, calib_filename))
+        calib_candidates.append(os.path.join(args.calib_results_dir, calib_filename))
 
     if args.calib_npz_override and os.path.exists(args.calib_npz_override):
         calib_npz_path = args.calib_npz_override
-    elif os.path.exists(calib_path_1):
-        calib_npz_path = calib_path_1
-    elif os.path.exists(calib_path_2):
-        calib_npz_path = calib_path_2
     else:
-        calib_npz_path = None
+        calib_npz_path = next((p for p in calib_candidates if os.path.exists(p)), None)
 
     if calib_npz_path:
         c = np.load(calib_npz_path)
@@ -563,7 +675,7 @@ def main():
         print(f"[calibration] alpha≈{alphas_used[idx]:.2f} -> q={q:.3e} -> r={r_radius:.3e}")
     else:
         print("WARNING: calibration npz not found at either path; using fallback r=0.05.\n"
-              f"  tried:\n    {calib_path_1}\n    {calib_path_2}")
+              f"  tried:\n    " + "\n    ".join(calib_candidates))
         r_radius = 0.05
 
     s_minus_nu = float(args.s_theorem - args.nu_theorem)  # = 0 with defaults
@@ -582,6 +694,7 @@ def main():
 
     # ----- per-trial loop -----
     results = []
+    trace_records = []
     rng_master = np.random.default_rng(args.seed)
     idxs = rng_master.choice(M, size=min(args.trials, M), replace=False)
 
@@ -620,10 +733,12 @@ def main():
         trial_seed = int(rng_master.integers(0, 10_000_000))
 
         # multi-stage optimization: coarse -> fine
-        def run_multistage(u_field, r_radius_stage):
+        def run_multistage(u_field, r_radius_stage, method_label, record_trace=False):
             centers_prev = None
             factor_prev = None
-            for f in factors:
+            method_trace = []
+            global_offset = 0
+            for stage_idx, f in enumerate(factors):
                 u_stage = downsample_average(u_field, f)
                 N_stage = u_stage.shape[0]
                 radius_stage = max(1e-6, args.radius_px / f)
@@ -632,28 +747,81 @@ def main():
                 if centers_prev is not None and factor_prev is not None:
                     scale = factor_prev / f
                     init_stage = [(y * scale, x * scale) for (y, x) in centers_prev]
-                centers_stage, _ = optimize_softmask_adam(
+                steps_stage = max(200, int(args.iters / f))
+                opt_result = optimize_softmask_adam(
                     u_pred_real=u_stage,
                     K=args.K_facilities,
                     radius_px=radius_stage,
                     r_radius=r_radius_stage,
                     s_minus_nu=s_minus_nu,
-                    steps=max(200, int(args.iters / f)),
-                    lr=0.15,
-                    tau=1.5,
+                    steps=steps_stage,
+                    lr=args.collection_lr,
+                    tau=args.collection_tau,
                     restarts=1 if init_stage is not None else args.collection_restarts,
                     seed=trial_seed,
                     device="cuda" if torch.cuda.is_available() else "cpu",
                     use_robust=(r_radius_stage > 0),
                     init_centers=init_stage,
+                    return_trace=record_trace,
+                    trace_every=args.trace_every,
                 )
+                if record_trace:
+                    centers_stage, _, stage_trace = opt_result
+                    for rec in stage_trace:
+                        rec = dict(rec)
+                        rec.update({
+                            "trial": int(t),
+                            "sample_index": int(i),
+                            "method": method_label,
+                            "stage_index": int(stage_idx),
+                            "stage_factor": int(f),
+                            "stage_resolution": int(N_stage),
+                            "radius_px": float(radius_stage),
+                            "r_radius": float(r_radius_stage),
+                            "global_iter": int(global_offset + rec["iter"]),
+                        })
+                        method_trace.append(rec)
+                    global_offset += steps_stage
+                else:
+                    centers_stage, _ = opt_result
                 centers_prev = centers_stage
                 factor_prev = f
             # final centers are in last stage grid (should be factor=1 => full res)
-            return centers_prev
+            return centers_prev, method_trace
 
-        w_nom = run_multistage(u_tilde_real, r_radius_stage=0.0)
-        w_rob = run_multistage(u_tilde_real, r_radius_stage=r_radius)
+        record_trace = bool(args.save_opt_traces and t < args.trace_trials)
+        w_nom, trace_nom = run_multistage(
+            u_tilde_real, r_radius_stage=0.0, method_label="nominal", record_trace=record_trace
+        )
+        w_rob, trace_rob = run_multistage(
+            u_tilde_real, r_radius_stage=r_radius, method_label="regularized", record_trace=record_trace
+        )
+        if args.hard_refine_iters > 0:
+            w_nom, _ = optimize(
+                u_tilde_real,
+                args.K_facilities,
+                args.radius_px,
+                nominal_obj,
+                iters=args.hard_refine_iters,
+                step_px=args.hard_refine_step_px,
+                init_centers=w_nom,
+                rng=np.random.default_rng(trial_seed + 1),
+            )
+            w_rob, _ = optimize(
+                u_tilde_real,
+                args.K_facilities,
+                args.radius_px,
+                robust_obj,
+                iters=args.hard_refine_iters,
+                step_px=args.hard_refine_step_px,
+                init_centers=w_rob,
+                rng=np.random.default_rng(trial_seed + 2),
+                r_radius=r_radius,
+                s_minus_nu=s_minus_nu,
+            )
+        if record_trace:
+            trace_records.extend(trace_nom)
+            trace_records.extend(trace_rob)
 
         # evaluate both on TRUE field
         Jn = J_collect(u_true_real, disk_mask_torus(N, w_nom, args.radius_px))
@@ -739,7 +907,7 @@ def main():
     print("\n=== Facet-1: Robust vs Nominal (TRUE-field evaluation) ===")
     print(f"PDE: {args.pde_type} | N={N} | Nout={args.snn_output_res} | trials={n}")
     print(f"alpha (radius): {args.alpha_for_radius:.2f}  ->  r = {r_radius:.4g}  |  s-ν = {s_minus_nu:.2f}")
-    print(f"K={args.K_facilities}, radius_px={args.radius_px}, iters={args.iters}, step={args.step_px}")
+    print(f"K={args.K_facilities}, radius_px={args.radius_px}, iters={args.iters}, step={args.step_px}, lr={args.collection_lr}, tau={args.collection_tau}, hard_refine={args.hard_refine_iters}")
     print(f"Nominal mean J_true: {mean_nom:.6f}")
     print(f"Robust  mean J_true: {mean_rob:.6f}")
     print(f"Mean (Rob - Nom):   {mean_diff:.6f}  ± {se_diff:.6f} (s.e.)")
@@ -761,6 +929,13 @@ def main():
                         summary=np.array([mean_nom, mean_rob, mean_diff, std_diff, n]),
                         r_radius=r_radius,
                         s_minus_nu=s_minus_nu)
+    trace_json_path = None
+    trace_fig_path = None
+    if trace_records:
+        trace_json_path = out_base + "_opt_traces.json"
+        trace_fig_path = out_base + "_opt_traces.png"
+        save_optimization_traces(trace_records, trace_json_path, trace_fig_path)
+        print(f"Saved optimization traces to:\n  {trace_json_path}\n  {trace_fig_path}")
     stats_payload = {
         "mean_nom": mean_nom,
         "mean_rob": mean_rob,
@@ -776,7 +951,13 @@ def main():
         "alpha_for_radius": args.alpha_for_radius,
         "r_radius": r_radius,
         "collection_radius_scale": args.collection_radius_scale,
-        "eval_field": args.eval_field
+        "collection_lr": args.collection_lr,
+        "collection_tau": args.collection_tau,
+        "hard_refine_iters": args.hard_refine_iters,
+        "hard_refine_step_px": args.hard_refine_step_px,
+        "eval_field": args.eval_field,
+        "optimization_trace_json": trace_json_path,
+        "optimization_trace_png": trace_fig_path,
     }
     with open(out_base + "_stats.json", "w") as f:
         json.dump(stats_payload, f, indent=2)

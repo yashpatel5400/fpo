@@ -61,7 +61,7 @@ def run_single_robust_opt(params_tuple):
     
     time.sleep(np.random.uniform(0, 0.2))
     log_prefix = f"[Worker {os.getpid()} Exp {exp_idx+1}/{total_exps} " \
-                 f"GRF_A={current_grf_alpha:.1f}, M={current_m_val}, SNN_Res={current_snn_res}] "
+                 f"GRF_A={current_grf_alpha:.2f}, M={current_m_val}, SNN_Res={current_snn_res}] "
     print(f"{log_prefix}Processing configuration...")
 
     # --- Construct necessary filenames and arguments ---
@@ -69,11 +69,11 @@ def run_single_robust_opt(params_tuple):
     if args.pde_type == "poisson":
         filename_suffix = f"poisson_grfA{current_grf_alpha:.1f}T{args.grf_tau:.1f}OffS{args.grf_offset_sigma:.1f}"
     elif args.pde_type == "step_index_fiber":
-        filename_suffix = (f"fiber_GRFinA{current_grf_alpha:.1f}T{args.grf_tau:.1f}_"
+        filename_suffix = (f"fiber_GRFinA{current_grf_alpha:.2f}T{args.grf_tau:.2f}_"
                            f"coreR{args.fiber_core_radius_factor:.1f}_V{args.fiber_potential_depth:.1f}_"
                            f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
     elif args.pde_type == "grin_fiber":
-        filename_suffix = (f"grinfiber_GRFinA{current_grf_alpha:.1f}T{args.grf_tau:.1f}_"
+        filename_suffix = (f"grinfiber_GRFinA{current_grf_alpha:.2f}T{args.grf_tau:.2f}_"
                            f"strength{args.grin_strength:.2e}_"
                            f"evoT{args.evolution_time_T:.1e}_steps{args.solver_num_steps}")
 
@@ -176,7 +176,7 @@ def generate_latex_table(results_dict, args):
         else:
             nom_str = f"\\textbf{{{nom_str}}}"
             
-        latex_string += f" {grf_alpha:.1f} & {m_val} & {snn_res} & {pgm_str} & {nom_str} & {rob_str} & {p_rob_pgm_str} & {p_rob_nom_str} \\\\\n"
+        latex_string += f" {grf_alpha:.2f} & {m_val} & {snn_res} & {pgm_str} & {nom_str} & {rob_str} & {p_rob_pgm_str} & {p_rob_nom_str} \\\\\n"
 
     latex_string += "\\bottomrule\n"
     latex_string += "\\end{tabular}\n"
@@ -256,8 +256,7 @@ if __name__ == '__main__':
     print(f"Sweeping over SNN Output Resolutions: {args.snn_output_res_values}")
 
     for i_exp, (current_grf_alpha, current_m_val, current_snn_res) in enumerate(outer_sweep_product):
-        # We need to ensure that the robust_opt script is called with the correct snn_output_res for each run
-        # We can pass it as part of the tuple to the worker function
+        # Pass the swept output resolution into the worker-specific argument set.
         current_iter_args = argparse.Namespace(**vars(args))
         current_iter_args.snn_output_res = current_snn_res # Set current snn_res for this iteration
 

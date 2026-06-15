@@ -41,15 +41,15 @@ def build_suffix(pde_type, a, grf_alpha):
     if pde_type == "poisson":
         return f"poisson_grfA{grf_alpha:.1f}T{a.grf_tau:.1f}OffS{a.grf_offset_sigma:.1f}"
     elif pde_type == "step_index_fiber":
-        return (f"fiber_GRFinA{grf_alpha:.1f}T{a.grf_tau:.1f}_"
+        return (f"fiber_GRFinA{grf_alpha:.2f}T{a.grf_tau:.2f}_"
                 f"coreR{a.fiber_core_radius_factor:.1f}_V{a.fiber_potential_depth:.1f}_"
                 f"evoT{a.evolution_time_T:.1e}_steps{a.solver_num_steps}")
     elif pde_type == "grin_fiber":
-        return (f"grinfiber_GRFinA{grf_alpha:.1f}T{a.grf_tau:.1f}_"
+        return (f"grinfiber_GRFinA{grf_alpha:.2f}T{a.grf_tau:.2f}_"
                 f"strength{a.grin_strength:.2e}_"
                 f"evoT{a.evolution_time_T:.1e}_steps{a.solver_num_steps}")
     elif pde_type == "heat_equation":
-        return (f"heat_GRFinA{grf_alpha:.1f}T{a.grf_tau:.1f}_"
+        return (f"heat_GRFinA{grf_alpha:.2f}T{a.grf_tau:.2f}_"
                 f"nu{a.viscosity_nu:.2e}_evoT{a.evolution_time_T:.1e}")
     else:
         return ""
@@ -101,7 +101,7 @@ def make_latex_table(results_map, grf_alphas, Nouts, caption, label,
         r"\begin{table}[h]",
         r"\centering",
         r"\small",
-        r"\begin{tabular}{{l|" + f"{'c'*len(Nouts)}" + r"}}",
+        r"\begin{tabular}{l|" + f"{'c'*len(Nouts)}" + r"}",
         r"\toprule",
         rf"$\rho$ & {header} \\ \midrule"
     ]
@@ -146,7 +146,8 @@ def worker_run_shard(params):
     base = expected_base(shard_out_dir, pde_type, a.n_grid_sim_input_ds, k_snn_out,
                          a.K_facilities, a.radius_px, a.alpha_for_radius, suffix)
     stats_json_path = base + "_stats.json"
-    if os.path.exists(stats_json_path):
+    trace_json_path = base + "_opt_traces.json"
+    if os.path.exists(stats_json_path) and (not a.save_opt_traces or os.path.exists(trace_json_path)):
         print(f"{log_prefix}Skipping shard: results already exist at {stats_json_path}")
         return base + ".npz" if os.path.exists(base + ".npz") else None
     # -------------------------------------------------------------------------------
@@ -162,6 +163,10 @@ def worker_run_shard(params):
         "--trials", shard_trials,
         "--iters", a.iters,
         "--collection_restarts", a.collection_restarts,
+        "--collection_lr", a.collection_lr,
+        "--collection_tau", a.collection_tau,
+        "--hard_refine_iters", a.hard_refine_iters,
+        "--hard_refine_step_px", a.hard_refine_step_px,
         "--K_facilities", a.K_facilities,
         "--radius_px", a.radius_px,
         "--step_px", a.step_px,
@@ -185,7 +190,12 @@ def worker_run_shard(params):
         "--viscosity_nu", a.viscosity_nu,
         "--evolution_time_T", a.evolution_time_T,
         "--solver_num_steps", a.solver_num_steps,
+        "--viz_trials", a.viz_trials,
     ]
+    if a.save_opt_traces:
+        cmd.append("--save_opt_traces")
+        cmd.extend(["--trace_trials", a.trace_trials])
+        cmd.extend(["--trace_every", a.trace_every])
 
     ok = run_script(a.collection_script, cmd, log_prefix=log_prefix, env_extra=env_gpu)
     if not ok:
@@ -258,6 +268,14 @@ if __name__ == "__main__":
     ap.add_argument('--iters', type=int, default=800)
     ap.add_argument('--collection_restarts', type=int, default=3,
                     help='Number of random restarts for the initial collection optimization stage.')
+    ap.add_argument('--collection_lr', type=float, default=0.15,
+                    help='Adam learning rate for differentiable soft-mask collection optimization.')
+    ap.add_argument('--collection_tau', type=float, default=1.5,
+                    help='Soft-mask temperature in pixels for differentiable collection optimization.')
+    ap.add_argument('--hard_refine_iters', type=int, default=0,
+                    help='If >0, run this many final hard-mask local-search refinement steps after soft-mask optimization.')
+    ap.add_argument('--hard_refine_step_px', type=int, default=1,
+                    help='Pixel proposal radius for optional final hard-mask refinement.')
     ap.add_argument('--K_facilities', type=int, default=3)
     ap.add_argument('--radius_px', type=int, default=6)
     ap.add_argument('--step_px', type=int, default=3)
@@ -301,6 +319,12 @@ if __name__ == "__main__":
                     help='How many shards per configuration (>=1).')
     ap.add_argument('--max_concurrent', type=int, default=None,
                     help='Optional cap on total concurrent subprocesses. Defaults to num_gpus * num_workers_per_job.')
+    ap.add_argument('--save_opt_traces', action='store_true',
+                    help='Pass through objective-trace diagnostics to collection.py.')
+    ap.add_argument('--trace_trials', type=int, default=3)
+    ap.add_argument('--trace_every', type=int, default=25)
+    ap.add_argument('--viz_trials', type=int, default=6,
+                    help='Number of per-row collection visualizations to save in collection.py.')
 
     # table options
     ap.add_argument('--use_test', type=str, default='ttest', choices=['ttest','sign'])
@@ -413,7 +437,15 @@ if __name__ == "__main__":
         "viscosity_nu": getattr(args, "viscosity_nu", None),
         "alpha_for_radius": args.alpha_for_radius,
         "collection_radius_scale": args.collection_radius_scale,
+        "collection_lr": args.collection_lr,
+        "collection_tau": args.collection_tau,
+        "hard_refine_iters": args.hard_refine_iters,
+        "hard_refine_step_px": args.hard_refine_step_px,
         "eval_field": args.eval_field,
+        "save_opt_traces": args.save_opt_traces,
+        "trace_trials": args.trace_trials,
+        "trace_every": args.trace_every,
+        "viz_trials": args.viz_trials,
         "results": serializable_results,
     }
     try:
