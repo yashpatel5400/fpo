@@ -374,11 +374,11 @@ if __name__ == '__main__':
                         data = all_sweep_results_dict[result_key_lookup]
                         ax.plot(data["nominal_coverages"], data["empirical_coverages_theorem"], 
                                 marker='o', linestyle='-', markersize=4, color=current_color,
-                                label=f'$N_{{max}}$={k_snn_val // 2} (Corrected)')
+                                label=f'$N_{{out}}$={k_snn_val} (Corrected)')
                         if data.get("empirical_coverages_no_correction") is not None:
                              ax.plot(data["nominal_coverages"], data["empirical_coverages_no_correction"], 
                                      marker='x', linestyle='--', markersize=4, color=current_color,
-                                     label=f'$N_{{max}}$={k_snn_val // 2} (Uncorrected)')
+                                     label=f'$N_{{out}}$={k_snn_val} (Uncorrected)')
                         has_data_for_this_subplot = True
                         plot_successful_overall = True
                 
