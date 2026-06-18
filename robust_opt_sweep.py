@@ -146,7 +146,7 @@ def generate_latex_table(results_dict, args):
     latex_string += f"\\label{{tab:rob_opt_summary_{args.pde_type}}}\n"
     latex_string += "\\begin{tabular}{ccc S[table-format=1.4] S[table-format=1.4] S[table-format=1.4] S[table-format=1.3] S[table-format=1.3]}\n"
     latex_string += "\\toprule\n"
-    latex_string += " {$\\rho$} & {M} & {$N_{max}$} & {PGM} & {Nominal} & {Robust} & {$p(R>P)$} & {$p(R>N)$} \\\\\n"
+    latex_string += " {$\\rho$} & {M} & {$N$} & {PGM} & {Nominal} & {Robust} & {$p(R>P)$} & {$p(R>N)$} \\\\\n"
     latex_string += "\\midrule\n"
 
     sorted_keys = sorted(results_dict.keys())
@@ -176,7 +176,8 @@ def generate_latex_table(results_dict, args):
         else:
             nom_str = f"\\textbf{{{nom_str}}}"
             
-        latex_string += f" {grf_alpha:.2f} & {m_val} & {snn_res} & {pgm_str} & {nom_str} & {rob_str} & {p_rob_pgm_str} & {p_rob_nom_str} \\\\\n"
+        mode_cutoff = snn_res // 2
+        latex_string += f" {grf_alpha:.2f} & {m_val} & {mode_cutoff} & {pgm_str} & {nom_str} & {rob_str} & {p_rob_pgm_str} & {p_rob_nom_str} \\\\\n"
 
     latex_string += "\\bottomrule\n"
     latex_string += "\\end{tabular}\n"
@@ -301,7 +302,7 @@ if __name__ == '__main__':
     print("\n\n--- Robust Optimization Sweep Summary ---")
     print(f"PDE Type: {args.pde_type}")
     print("-" * 115)
-    print(f"{'GRF Alpha':<12} {'M':<4} {'N_max':<6} {'Avg I_AB (PGM)':<18} {'Avg I_AB (Nominal)':<22} {'Avg I_AB (Robust)':<22} {'p(R>P)':<10} {'p(R>N)':<10}")
+    print(f"{'GRF Alpha':<12} {'M':<4} {'N':<6} {'Avg I_AB (PGM)':<18} {'Avg I_AB (Nominal)':<22} {'Avg I_AB (Robust)':<22} {'p(R>P)':<10} {'p(R>N)':<10}")
     print("-" * 115)
 
     sorted_keys = sorted(all_sweep_results_dict.keys())
@@ -319,7 +320,8 @@ if __name__ == '__main__':
             p_val_rob_gt_pgm = data.get('p_value_rob_gt_pgm', 1.0)
             p_val_rob_gt_nom = data.get('p_value_rob_gt_nom', 1.0)
 
-            print(f"{grf_alpha:<12.2f} {m_val:<4} {snn_res:<6} {pgm_iab:<18.4f} {nom_iab:<22.4f} {rob_iab:<22.4f} {p_val_rob_gt_pgm:<10.3f} {p_val_rob_gt_nom:<10.3f}")
+            mode_cutoff = snn_res // 2
+            print(f"{grf_alpha:<12.2f} {m_val:<4} {mode_cutoff:<6} {pgm_iab:<18.4f} {nom_iab:<22.4f} {rob_iab:<22.4f} {p_val_rob_gt_pgm:<10.3f} {p_val_rob_gt_nom:<10.3f}")
     
     print("-" * 115)
     

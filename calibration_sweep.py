@@ -367,6 +367,7 @@ if __name__ == '__main__':
                 has_data_for_this_subplot = False
                 for i_snn, k_snn_val in enumerate(sorted(args.k_snn_output_res_values)):
                     result_key_lookup = (k_snn_val, args.pde_type, current_grf_alpha_plot_val, plot_iter_filename_suffix)
+                    mode_cutoff = k_snn_val // 2
                     
                     current_color = color_cycle[i_snn % len(color_cycle)]
 
@@ -374,11 +375,11 @@ if __name__ == '__main__':
                         data = all_sweep_results_dict[result_key_lookup]
                         ax.plot(data["nominal_coverages"], data["empirical_coverages_theorem"], 
                                 marker='o', linestyle='-', markersize=4, color=current_color,
-                                label=f'$N_{{out}}$={k_snn_val} (Corrected)')
+                                label=f'$N$={mode_cutoff} (Corrected)')
                         if data.get("empirical_coverages_no_correction") is not None:
                              ax.plot(data["nominal_coverages"], data["empirical_coverages_no_correction"], 
                                      marker='x', linestyle='--', markersize=4, color=current_color,
-                                     label=f'$N_{{out}}$={k_snn_val} (Uncorrected)')
+                                     label=f'$N$={mode_cutoff} (Uncorrected)')
                         has_data_for_this_subplot = True
                         plot_successful_overall = True
                 

@@ -15,7 +15,7 @@ RUN=replication_runs/reproduce_final
 FC=$RUN/functional_coverage
 ```
 
-The selected local artifacts are collected in `replication_runs/final_selected_20260615/`, with the updated Poisson `N_out=8,12,16` calibration/collection run in `replication_runs/poisson_nout8_12_16_20260615/`. Large scratch and screening outputs should remain outside version control.
+The selected local artifacts are collected in `replication_runs/final_selected_20260615/`, with the updated Poisson calibration/collection run at mode cutoffs `N=4,6,8` in `replication_runs/poisson_nout8_12_16_20260615/` (the artifact name uses implementation widths). Large scratch and screening outputs should remain outside version control.
 
 ## Implementation Notes
 
@@ -23,7 +23,8 @@ The selected local artifacts are collected in `replication_runs/final_selected_2
 - Sweep scripts call `sys.executable` so subprocesses use the same Python environment.
 - Non-Poisson filenames use two-decimal GRF parameters. Loaders also accept legacy one-decimal artifacts where needed.
 - Fiber calibration supports `--fiber_bound_type input_laplacian`, the sharper sample-dependent graph-norm tail bound used for the final T=0.4 fiber curves.
-- Heat calibration uses the semigroup tail correction with the spectral cutoff `N_out/2`.
+- Command-line `*_output_res` and `SNNres` values are implementation output widths; the paper reports the corresponding mode cutoff `N = output_res/2`.
+- Heat calibration uses the semigroup tail correction with the spectral cutoff `N = N_out/2`.
 - Collection supports full-field evaluation, optimizer traces, radius scaling, restarts, and the final heat `K_facilities=7` geometry.
 - Quantum outputs include per-trial PGM, nominal, and robust mutual information so paired tests are auditable.
 
@@ -80,8 +81,14 @@ $PY collection_sweep.py --pde_type heat_equation --k_snn_output_res_values 48 56
 Observed selected results:
 
 - Table 2 selected rows: `8/8` positive robust-minus-nominal differences and `7/8` one-sided paired t-test significant at `0.05`.
-- Poisson selected rows: `4/4` positive and `4/4` significant for `rho in {1.0, 1.25}` and `N_out in {8, 12}`.
-- Heat selected rows: `4/4` positive and `3/4` significant for `rho in {1.5, 1.75}` and `N_out in {48, 56}`.
+- Poisson selected rows: `4/4` positive and `4/4` significant for `rho in {1.0, 1.25}` and mode cutoffs `N in {4, 6}`.
+- Heat selected rows: `4/4` positive and `3/4` significant for `rho in {1.5, 1.75}` and mode cutoffs `N in {24, 28}`.
+
+Appendix collection visualizations with nominal, robust, and true-field optimized placements:
+
+```bash
+$PY appendix_collection_viz.py --trial_indices 63,95
+```
 
 Optimizer-trace diagnostics:
 
@@ -104,4 +111,4 @@ $PY robust_opt_sweep.py --pde_type grin_fiber --grf_alpha_values 1.5 1.75 --num_
 Observed selected results:
 
 - Robust beats PGM in all `16/16` fiber quantum rows, with all one-sided paired p-values below `0.05`.
-- Robust beats nominal significantly in `14/16` rows. The two non-significant rows are the step-index `rho=1.5, M=4` cases at `SNNres=48` and `SNNres=64`; they are near-ties versus nominal but still strongly above PGM.
+- Robust beats nominal significantly in `14/16` rows. The two non-significant rows are the GRIN `rho=1.5, M=4` cases at mode cutoffs `N=24` and `N=32`; they are near-ties versus nominal but still strongly above PGM.

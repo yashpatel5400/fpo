@@ -202,8 +202,10 @@ if __name__ == '__main__':
                                     f"_Nin{args.n_grid_sim_input_ds}_SNNout{snn_output_res_val}_NfullThm{N_full_for_theorem}"
                                     f"_{filename_suffix}") 
     
+    snn_mode_cutoff = snn_output_res_val // 2
+    full_mode_cutoff = N_full_for_theorem // 2
     scenario_title_suffix = (f"(PDE: {args.pde_type}, Thm: $s={args.s_theorem}, \\nu={args.nu_theorem}, d={args.d_dimensions}\n"
-                             f"$N_{{in}}={args.n_grid_sim_input_ds}, N_{{SNNout}}={snn_output_res_val}, N_{{fullThm}}={N_full_for_theorem}$, "
+                             f"$N_{{in}}={args.n_grid_sim_input_ds}, N={snn_mode_cutoff}, N_{{full}}={full_mode_cutoff}$, "
                              f"Params: {filename_suffix}$)")
     
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
